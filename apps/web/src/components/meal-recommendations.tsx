@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import type { FoodPreferences } from "@/lib/preferences";
 import type { MealDish, MealRecommendations } from "@/lib/recipes";
 
+const RECOMMENDATIONS_STORAGE_KEY = "fridge_latest_meal_recommendations";
+
 export function MealRecommendations({ initialPreferences }: { initialPreferences: FoodPreferences }) {
   const [preferences, setPreferences] = useState(initialPreferences);
   const [results, setResults] = useState<MealRecommendations | null>(null);
@@ -19,6 +21,12 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
   const [selectedRecipe, setSelectedRecipe] = useState<MealDish | null>(null);
 
   useEffect(() => {
+    try {
+      const cached = localStorage.getItem(RECOMMENDATIONS_STORAGE_KEY);
+      if (cached) setResults(JSON.parse(cached));
+    } catch {
+      // Ignore
+    }
     void loadFavorites();
   }, []);
 
@@ -53,6 +61,11 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
       const data = (await response.json()) as { recommendations?: MealRecommendations; error?: string };
       if (!response.ok || !data.recommendations) throw new Error(data.error ?? "暂时无法推荐菜式");
       setResults(data.recommendations);
+      try {
+        localStorage.setItem(RECOMMENDATIONS_STORAGE_KEY, JSON.stringify(data.recommendations));
+      } catch {
+        // Ignore
+      }
       await loadFavorites();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "暂时无法推荐菜式");

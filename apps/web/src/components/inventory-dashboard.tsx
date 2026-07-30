@@ -16,7 +16,7 @@ import type { FoodPreferences } from "@/lib/preferences";
 import type { MealRecommendations as MealRecommendationsData } from "@/lib/recipes";
 
 type AddForm = { name: string; category: (typeof foodCategories)[number]; quantity: string; unit: string; purchasedAt: string; storageLocation: (typeof storageLocations)[number]; opened: boolean };
-type Tab = "today" | "inventory" | "favorites" | "history" | "more";
+type Tab = "today" | "inventory" | "recipes" | "more";
 type HistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; detail: string; createdAt: string };
 type BatchChanges = Extract<ProposalAction, { type: "update_batch" }>["changes"];
 type AgentPhase = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
@@ -44,6 +44,20 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
   if (!conversationId.current) conversationId.current = globalThis.crypto?.randomUUID?.() ?? `session-${Date.now()}`;
 
   useEffect(() => {
+    void fetchHistory();
+  }, []);
+
+  async function fetchHistory() {
+    try {
+      const response = await fetch("/api/history");
+      const data = (await response.json()) as { history?: HistoryItem[] };
+      if (data.history) setHistory(data.history);
+    } catch {
+      // Ignore
+    }
+  }
+
+  useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 3600);
     return () => window.clearTimeout(timer);
@@ -58,61 +72,86 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     return () => { document.documentElement.style.overflow = overflow; document.body.style.overflow = bodyOverflow; };
   }, [tab]);
 
-  async function loadInventory() { const response = await fetch("/api/inventory", { cache: "no-store" }); const data = await response.json() as { batches: FoodBatchWithStatus[] }; setBatches(data.batches); }
-  async function loadHistory() { const response = await fetch("/api/history", { cache: "no-store" }); const data = await response.json() as { items?: HistoryItem[] }; if (response.ok) setHistory(data.items ?? []); }
-  useEffect(() => { if (tab === "history") void loadHistory(); }, [tab]);
   async function queueAction(action: ProposalAction) {
     setBusy(true); setNotice("");
     try {
-      const response = await fetch("/api/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, idempotencyKey: crypto.randomUUID() }) });
-      const data = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? "无法写入库存");
-      setShowAdd(false); setForm(initialForm); setNotice("已更新库存"); await loadInventory();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "无法写入库存"); } finally { setBusy(false); }
+      const response = await fetch("/api/inventory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
+      const data = (await response.json()) as { batches?: FoodBatchWithStatus[]; error?: string };
+      if (!response.ok || !data.batches) throw new Error(data.error ?? "更新库存失败");
+      setBatches(data.batches);
+      void fetchHistory();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "无法更新库存"); } finally { setBusy(false); }
   }
-  async function createPreview(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); await queueAction({ type: "add_batches", batches: [{ ...form, quantity: Number(form.quantity) }] }); }
-  async function askAgent(message: string) {
-    stopBrowserSpeech(); setBusy(true); setNotice(""); setAgentPhase("thinking");
+
+  async function askAgent(userPrompt: string) {
+    setBusy(true); setNotice(""); setAgentPhase("thinking");
+    const userMsgId = `user-${Date.now()}`;
+    const nextMessages: ChatMessage[] = [...messages, { id: userMsgId, role: "user", content: userPrompt, status: "committed" }];
+    setMessages(nextMessages);
     try {
-      const response = await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, conversationId: conversationId.current, idempotencyKey: crypto.randomUUID() }) });
-      const data = await response.json() as { message?: string; speech?: string; proposal?: OperationProposal | null; committed?: unknown; history?: ChatMessage[]; error?: string };
-      if (!response.ok || !data.message) throw new Error(data.error ?? "Agent 暂时无法回复");
-      if (data.history) setMessages(data.history);
+      const response = await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: userPrompt, conversationId: conversationId.current }) });
+      const data = (await response.json()) as { message?: string; proposal?: OperationProposal; batches?: FoodBatchWithStatus[]; error?: string };
+      if (!response.ok) throw new Error(data.error ?? "Agent 暂时无法处理请求");
+      if (data.batches) setBatches(data.batches);
+      const replyContent = data.message ?? (data.proposal ? "我为你生成了入库方案，请确认。" : "我已经为你处理好了。");
+      setMessages([...nextMessages, { id: `agent-${Date.now()}`, role: "assistant", content: replyContent, status: "committed" }]);
+      if (data.proposal) setAgentProposal(data.proposal);
+      void fetchHistory();
       if (voiceReplies) {
         setAgentPhase("speaking");
-        speakReply(data.speech ?? data.message!, () => setAgentPhase((phase) => phase === "speaking" ? "idle" : phase));
-      } else setAgentPhase("idle");
-      if (data.proposal) setAgentProposal(data.proposal);
-      if (data.committed) await loadInventory();
-    } catch (error) { setAgentPhase("idle"); setMessages((items) => [...items, { id: crypto.randomUUID(), role: "assistant", content: error instanceof Error ? error.message : "Agent 暂时无法回复", status: "pending" }]); } finally { setBusy(false); }
+        speakReply(replyContent, () => setAgentPhase("idle"));
+      } else {
+        setAgentPhase("idle");
+      }
+    } catch (error) {
+      setAgentPhase("idle");
+      const message = error instanceof Error ? error.message : "Agent 无法处理你的请求";
+      setNotice(message);
+      setMessages([...nextMessages, { id: `agent-[#err-${Date.now()}]`, role: "assistant", content: `出错提示：${message}`, status: "committed" }]);
+    } finally { setBusy(false); }
   }
+
   async function confirmAgentProposal() {
     if (!agentProposal) return;
     setBusy(true); setNotice("");
     try {
-      const response = await fetch(`/api/proposals/${agentProposal.id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), conversationId: conversationId.current }) });
-      const data = await response.json() as { error?: string; history?: ChatMessage[] };
-      if (!response.ok) throw new Error(data.error ?? "无法写入库存");
-      if (data.history) setMessages(data.history); else setMessages((items) => items.map((item) => item.status === "pending" ? { ...item, status: "committed" } : item));
-      setAgentProposal(null); setNotice("已写入库存"); await loadInventory();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "无法写入库存"); } finally { setBusy(false); }
+      const response = await fetch(`/api/proposals/${agentProposal.id}/confirm`, { method: "POST" });
+      const data = (await response.json()) as { batches?: FoodBatchWithStatus[]; error?: string };
+      if (!response.ok || !data.batches) throw new Error(data.error ?? "确认写库失败");
+      setBatches(data.batches);
+      setAgentProposal(null);
+      void fetchHistory();
+      setNotice("修改成功！全家库存已更新");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "确认失败"); } finally { setBusy(false); }
   }
+
+  function createPreview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const quantity = Number(form.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) { setNotice("请输入合理的数值数量"); return; }
+    setShowAdd(false);
+    void queueAction({ type: "add_batches", batches: [{ name: form.name, category: form.category, quantity, unit: form.unit, purchasedAt: form.purchasedAt, storageLocation: form.storageLocation, opened: form.opened }] });
+    setForm({ ...initialForm, purchasedAt: todayValue });
+  }
+
   async function recognizeImage(file: File) {
-    setBusy(true); setNotice("");
+    setBusy(true); setNotice(""); setAgentPhase("thinking");
     try {
-      const upload = new FormData(); upload.set("image", file);
+      const upload = new FormData(); upload.set("file", file);
       const response = await fetch("/api/media/image", { method: "POST", body: upload }); const data = await response.json() as { candidates?: FoodCandidate[]; error?: string };
-      if (!response.ok || !data.candidates?.length) throw new Error(data.error ?? "没有识别到可入库的食物，请手动添加");
-      setPhotoCandidates(data.candidates);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "图片识别失败，请改用手动入库"); } finally { setBusy(false); }
+      if (!response.ok || !data.candidates) throw new Error(data.error ?? "无法识别图片，请试着用文字告诉我");
+      if (!data.candidates.length) throw new Error("图片中未发现清晰食物，请手动添加");
+      setPhotoCandidates(data.candidates); setAgentPhase("idle");
+    } catch (error) { setAgentPhase("idle"); setNotice(error instanceof Error ? error.message : "照片识别失败"); } finally { setBusy(false); }
   }
+
   async function recommendFromPhoto(candidates: FoodCandidate[]) {
     setBusy(true); setNotice("");
     try {
       const response = await fetch("/api/recommendations/photo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidates }) });
       const data = (await response.json()) as { recommendations?: MealRecommendationsData; error?: string };
-      if (!response.ok || !data.recommendations) throw new Error(data.error ?? "暂时无法根据照片推荐菜式");
-      setPhotoCandidates(null); setPhotoRecommendations(data.recommendations);
+      if (!response.ok || !data.recommendations) throw new Error(data.error ?? "暂时无法生成基于照片的建议");
+      setPhotoRecommendations(data.recommendations);
     } catch (error) { setNotice(error instanceof Error ? error.message : "暂时无法根据照片推荐菜式"); } finally { setBusy(false); }
   }
   async function transcribeAndSend(audio: Blob) {
@@ -136,9 +175,8 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     <div className={`mx-auto w-full max-w-xl px-4 sm:px-5 pt-[max(1.2rem,env(safe-area-inset-top))] ${tab === "today" ? "h-full" : ""}`}>
       {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
       {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
-      {tab === "favorites" && <FavoritesView />}
-      {tab === "history" && <HistoryView items={history} />}
-      {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} />}
+      {tab === "recipes" && <RecipesTab initialPreferences={initialPreferences} />}
+      {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} history={history} />}
     </div>
     {notice && tab !== "today" && <p role="status" className="fixed inset-x-5 top-[max(1rem,env(safe-area-inset-top))] z-40 mx-auto max-w-md rounded-full bg-white/95 px-4 py-2 text-center text-sm font-medium text-[#405148] shadow-lg backdrop-blur-xl">{notice}</p>}
     {showAdd && <AddSheet form={form} setForm={setForm} busy={busy} onClose={() => setShowAdd(false)} onSubmit={createPreview} />}
@@ -146,8 +184,53 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     {agentProposal && <AgentConfirmSheet proposal={agentProposal} busy={busy} onCancel={() => setAgentProposal(null)} onConfirm={() => void confirmAgentProposal()} />}
     {photoCandidates && <PhotoCandidatesSheet candidates={photoCandidates} busy={busy} onClose={() => setPhotoCandidates(null)} onRecommend={(candidates) => void recommendFromPhoto(candidates)} onContinue={(candidates) => { setPhotoCandidates(null); void queueAction({ type: "add_batches", batches: candidates.map((item) => ({ ...item, purchasedAt: todayValue })) }); }} />}
     {photoRecommendations && <Sheet title="这些食材可以做什么？" onClose={() => setPhotoRecommendations(null)}><p className="-mt-2 text-sm leading-5 text-[#64736c]">照片食材尚未写入库存；以下建议仅供决定是否入库或做菜。</p><MealRecommendationCards recommendations={photoRecommendations} /></Sheet>}
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-[#f7f8f5]/90 px-3 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl"><div className="mx-auto grid max-w-xl grid-cols-5"><TabButton active={tab === "today"} label="今天" icon="home" onClick={() => setTab("today")} /><TabButton active={tab === "inventory"} label="库存" icon="grid" onClick={() => setTab("inventory")} /><TabButton active={tab === "favorites"} label="收藏" icon="star" onClick={() => setTab("favorites")} /><TabButton active={tab === "history"} label="记录" icon="history" onClick={() => setTab("history")} /><TabButton active={tab === "more"} label="更多" icon="sliders" onClick={() => setTab("more")} /></div></nav>
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-[#f7f8f5]/90 px-4 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl"><div className="mx-auto grid max-w-xl grid-cols-4"><TabButton active={tab === "today"} label="今天" icon="home" onClick={() => setTab("today")} /><TabButton active={tab === "inventory"} label="库存" icon="grid" onClick={() => setTab("inventory")} /><TabButton active={tab === "recipes"} label="吃什么" icon="star" onClick={() => setTab("recipes")} /><TabButton active={tab === "more"} label="更多" icon="sliders" onClick={() => setTab("more")} /></div></nav>
   </main>;
+}
+
+function RecipesTab({ initialPreferences }: { initialPreferences: FoodPreferences }) {
+  return <section className="mt-7 grid gap-6">
+    <MealRecommendations initialPreferences={initialPreferences} />
+    <div className="rounded-3xl bg-white p-4 shadow-sm">
+      <FavoritesView embedded />
+    </div>
+  </section>;
+}
+
+function MoreView({ username, initialCredentials, initialPreferences, vapidPublicKey, history }: { username: string; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string; history: HistoryItem[] }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const [showFavorites, setShowFavorites] = useState(false);
+
+  return <section className="mt-7 grid gap-5">
+    <div><h2 className="text-[25px] font-bold tracking-[-.04em]">更多</h2><p className="mt-1 text-sm text-[#6f8178]">偏好、提醒与模型设置</p></div>
+    <div className="grid grid-cols-2 gap-3">
+      <button type="button" onClick={() => setShowFavorites(true)} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600"><Icon name="star" /></div>
+        <div><h3 className="text-sm font-bold text-[#173f35]">收藏菜谱</h3><p className="text-[11px] text-[#6f8178]">看页做饭指南</p></div>
+      </button>
+      <button type="button" onClick={() => setShowHistory(true)} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-[#173f35]"><Icon name="history" /></div>
+        <div><h3 className="text-sm font-bold text-[#173f35]">操作记录</h3><p className="text-[11px] text-[#6f8178]">全家共享日志</p></div>
+      </button>
+    </div>
+    <AccountSettings username={username} />
+    <AgentWriteSettings />
+    <NotificationControl vapidPublicKey={vapidPublicKey} />
+    <ShelfLifeSettings />
+    <LlmSettings initialCredentials={initialCredentials} />
+
+    {showHistory && <Sheet title="操作历史记录" onClose={() => setShowHistory(false)}><HistoryView items={history} embedded /></Sheet>}
+    {showFavorites && <Sheet title="我的收藏菜谱" onClose={() => setShowFavorites(false)}><FavoritesView embedded /></Sheet>}
+  </section>;
+}
+
+function HistoryView({ items, embedded = false }: { items: HistoryItem[]; embedded?: boolean }) {
+  return <section className={embedded ? "" : "mt-7"}>
+    {!embedded && <><h2 className="text-[25px] font-bold tracking-[-.04em]">操作记录</h2><p className="mt-1 text-sm text-[#6f8178]">全家共享；可核对 Agent 实际执行的写库操作。</p></>}
+    <div className={`${embedded ? "mt-2" : "mt-5"} overflow-hidden rounded-[24px] bg-white shadow-[0_3px_14px_rgba(23,63,53,.05)]`}>
+      {items.length ? items.map((item, index) => <article key={item.id} className={`px-4 py-3 ${index ? "border-t border-[#edf0eb]" : ""}`}><div className="flex items-start justify-between gap-3"><p className="min-w-0 font-semibold leading-6">{item.detail}</p><span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.source === "agent" ? "bg-[#dcece3] text-[#173f35]" : "bg-[#eef1ee] text-[#66756d]"}`}>{item.source === "agent" ? "Agent" : "手动"}</span></div><p className="mt-1 text-xs text-[#74827a]">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.createdAt))}</p></article>) : <p className="px-5 py-10 text-center text-sm text-[#74827a]">还没有操作记录。</p>}
+    </div>
+  </section>;
 }
 
 function TodayView({ messages, notice, busy, agentPhase, setAgentPhase, recognizeImage, transcribe, voiceError, voiceReplies, toggleVoiceReplies, openAdd }: { messages: Array<{ role: "assistant" | "user"; content: string }>; notice: string; busy: boolean; agentPhase: AgentPhase; setAgentPhase: (phase: AgentPhase) => void; recognizeImage: (file: File) => void; transcribe: (audio: Blob) => void; voiceError: (message: string) => void; voiceReplies: boolean; toggleVoiceReplies: () => void; openAdd: () => void }) {
@@ -165,9 +248,6 @@ function InventoryView({ batches, onAdd, onConsume, onSetOpened, onEditStart, on
   return <section className="mt-7"><div className="flex items-center justify-between"><div><h2 className="text-[25px] font-bold tracking-[-.04em]">库存</h2><p className="mt-1 text-sm text-[#6f8178]">{batches.length} 个采购批次 · 临期优先</p></div><button type="button" onClick={onAdd} className="grid h-11 w-11 place-items-center rounded-full bg-[#173f35] text-white shadow-lg active:scale-95" aria-label="手动入库"><Icon name="plus" /></button></div>{batches.length === 0 ? <EmptyInventory onAdd={onAdd} /> : <><div className="mt-5 grid grid-cols-3 rounded-2xl bg-[#e8ece7] p-1 text-sm font-semibold">{(["all", "category", "location"] as const).map((item) => <button key={item} type="button" onClick={() => setGroupBy(item)} className={`rounded-xl py-2 transition ${groupBy === item ? "bg-white text-[#173f35] shadow-sm" : "text-[#718078]"}`}>{{ all: "全部", category: "类别", location: "位置" }[item]}</button>)}</div><div className="mt-4 grid gap-4">{sections.map((section) => <section key={section.label}>{groupBy !== "all" && <p className="mb-2 px-1 text-sm font-semibold text-[#6f8178]">{section.label}</p>}<div className="overflow-hidden rounded-[22px] bg-white shadow-[0_3px_14px_rgba(23,63,53,.05)]">{section.batches.map((batch, index) => <BatchRow key={batch.id} batch={batch} first={index === 0} onConsume={() => onConsume(batch)} onSetOpened={(opened) => onSetOpened(batch, opened)} onEdit={() => onEditStart(batch)} onDelete={() => onDelete(batch)} />)}</div></section>)}</div></>}</section>;
 }
 
-function MoreView({ username, initialCredentials, initialPreferences, vapidPublicKey }: { username: string; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string }) { return <section className="mt-7 grid gap-5"><div><h2 className="text-[25px] font-bold tracking-[-.04em]">更多</h2><p className="mt-1 text-sm text-[#6f8178]">偏好、提醒与模型设置</p></div><AccountSettings username={username} /><AgentWriteSettings /><MealRecommendations initialPreferences={initialPreferences} /><NotificationControl vapidPublicKey={vapidPublicKey} /><ShelfLifeSettings /><LlmSettings initialCredentials={initialCredentials} /></section>; }
-
-function HistoryView({ items }: { items: HistoryItem[] }) { return <section className="mt-7"><h2 className="text-[25px] font-bold tracking-[-.04em]">操作记录</h2><p className="mt-1 text-sm text-[#6f8178]">全家共享；可核对 Agent 实际执行的写库操作。</p><div className="mt-5 overflow-hidden rounded-[24px] bg-white shadow-[0_3px_14px_rgba(23,63,53,.05)]">{items.length ? items.map((item, index) => <article key={item.id} className={`px-4 py-3 ${index ? "border-t border-[#edf0eb]" : ""}`}><div className="flex items-start justify-between gap-3"><p className="min-w-0 font-semibold leading-6">{item.detail}</p><span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.source === "agent" ? "bg-[#dcece3] text-[#173f35]" : "bg-[#eef1ee] text-[#66756d]"}`}>{item.source === "agent" ? "Agent" : "手动"}</span></div><p className="mt-1 text-xs text-[#74827a]">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.createdAt))}</p></article>) : <p className="px-5 py-10 text-center text-sm text-[#74827a]">还没有操作记录。</p>}</div></section>; }
 function QuickAction({ label, icon, onClick, disabled }: { label: string; icon: IconName; onClick: () => void; disabled: boolean }) { return <button type="button" onClick={onClick} disabled={disabled} aria-label={label} title={label} className="grid h-12 w-12 place-items-center rounded-full border border-white/80 bg-white/80 text-[#173f35] shadow-[0_6px_18px_rgba(23,63,53,.12)] backdrop-blur-xl transition-transform duration-100 active:scale-95 disabled:opacity-50"><Icon name={icon} /></button>; }
 
 function AddSheet({ form, setForm, busy, onClose, onSubmit }: { form: AddForm; setForm: (value: AddForm) => void; busy: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void }) { return <Sheet title="添加食材" onClose={onClose}><form className="grid gap-4" onSubmit={onSubmit}><Field label="食物名称"><input autoFocus required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：菠菜" /></Field><div className="grid grid-cols-2 gap-3"><Field label="数量"><input required min="0.01" step="0.01" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} /></Field><Field label="单位"><input required value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value })} /></Field></div><div className="grid grid-cols-2 gap-3"><Field label="类别"><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value as AddForm["category"] })}>{foodCategories.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="存放位置"><select value={form.storageLocation} onChange={(event) => setForm({ ...form, storageLocation: event.target.value as AddForm["storageLocation"] })}>{storageLocations.map((item) => <option key={item}>{item}</option>)}</select></Field></div><Field label="购买日期"><input required type="date" value={form.purchasedAt} onChange={(event) => setForm({ ...form, purchasedAt: event.target.value })} /></Field><label className="flex items-center gap-3 rounded-2xl bg-[#f3f4f0] px-4 py-3 text-sm font-medium"><input type="checkbox" checked={form.opened} onChange={(event) => setForm({ ...form, opened: event.target.checked })} /> 已开封</label><button disabled={busy} className="mt-1 rounded-2xl bg-[#173f35] py-4 font-semibold text-white shadow-lg disabled:opacity-50">直接入库</button></form></Sheet>; }

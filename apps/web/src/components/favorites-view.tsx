@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { CookingModal } from "@/components/meal-recommendations";
 import type { SavedRecipe } from "@/lib/favorites";
 
-export function FavoritesView() {
+export function FavoritesView({ embedded = false }: { embedded?: boolean }) {
   const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState<SavedRecipe | null>(null);
@@ -44,13 +44,19 @@ export function FavoritesView() {
   const filtered = recipes.filter((r) => r.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
-    <section className="mt-7">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">收藏菜谱</h2>
-          <p className="mt-1 text-sm text-[#6f8178]">{recipes.length} 道已收藏菜谱 · 照着页面轻松做饭</p>
+    <section className={embedded ? "" : "mt-7"}>
+      {!embedded ? (
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">收藏菜谱</h2>
+            <p className="mt-1 text-sm text-[#6f8178]">{recipes.length} 道已收藏菜谱 · 照着页面轻松做饭</p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-[#173f35]">⭐ 我的收藏菜谱 ({recipes.length})</h3>
+        </div>
+      )}
 
       {recipes.length > 0 && (
         <div className="mt-4">
