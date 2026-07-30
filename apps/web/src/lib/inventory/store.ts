@@ -47,7 +47,7 @@ export type ConfirmedWrite = {
 };
 
 export class InventoryStore {
-  constructor(private readonly db: Database.Database) {
+  constructor(private readonly db: Database.Database, private readonly householdId = DEFAULT_HOUSEHOLD_ID) {
     this.initialize();
   }
 
@@ -62,6 +62,7 @@ export class InventoryStore {
         household_id TEXT NOT NULL,
         category TEXT NOT NULL,
         shelf_life_days INTEGER NOT NULL CHECK (shelf_life_days >= 0),
+        storage_location TEXT NOT NULL DEFAULT '冷藏室',
         PRIMARY KEY (household_id, category)
       );
       CREATE TABLE IF NOT EXISTS food_batches (
@@ -98,30 +99,50 @@ export class InventoryStore {
     `);
 
     const now = new Date().toISOString();
-    this.db.prepare("INSERT OR IGNORE INTO households (id, created_at) VALUES (?, ?)").run(DEFAULT_HOUSEHOLD_ID, now);
-    const defaults: Array<[string, number]> = [["蔬菜", 4], ["水果", 7], ["乳制品", 7], ["肉类", 3], ["海鲜", 2], ["主食", 30], ["饮料", 14], ["其他", 7]];
-    const insert = this.db.prepare("INSERT OR IGNORE INTO category_defaults (household_id, category, shelf_life_days) VALUES (?, ?, ?)");
-    for (const [category, days] of defaults) insert.run(DEFAULT_HOUSEHOLD_ID, category, days);
+    const categoryDefaultColumns = this.db.prepare("PRAGMA table_info(category_defaults)").all() as Array<{ name: string }>;
+    const needsStorageDefaultsMigration = !categoryDefaultColumns.some((column) => column.name === "storage_location");
+    if (needsStorageDefaultsMigration) this.db.exec("ALTER TABLE category_defaults ADD COLUMN storage_location TEXT NOT NULL DEFAULT '冷藏室'");
+    this.db.prepare("INSERT OR IGNORE INTO households (id, created_at) VALUES (?, ?)").run(this.householdId, now);
+    const defaults: Array<[FoodBatch["category"], number, FoodBatch["storageLocation"]]> = [["蔬菜", 4, "冷藏室"], ["水果", 7, "冷藏室"], ["乳制品", 7, "冷藏室"], ["肉类", 3, "冷藏室"], ["海鲜", 2, "冷冻室"], ["主食", 30, "常温柜"], ["饮料", 14, "常温柜"], ["其他", 7, "冷藏室"]];
+    const insert = this.db.prepare("INSERT OR IGNORE INTO category_defaults (household_id, category, shelf_life_days, storage_location) VALUES (?, ?, ?, ?)");
+    for (const [category, days, storageLocation] of defaults) insert.run(this.householdId, category, days, storageLocation);
+    if (needsStorageDefaultsMigration) {
+      const updateStorage = this.db.prepare("UPDATE category_defaults SET storage_location = ? WHERE household_id = ? AND category = ?");
+      for (const [category, , storageLocation] of defaults) updateStorage.run(storageLocation, this.householdId, category);
+    }
   }
 
-  setCategoryDefault(category: FoodBatch["category"], shelfLifeDays: number) {
-    this.db.prepare(`INSERT INTO category_defaults (household_id, category, shelf_life_days) VALUES (?, ?, ?)
-      ON CONFLICT(household_id, category) DO UPDATE SET shelf_life_days = excluded.shelf_life_days`).run(DEFAULT_HOUSEHOLD_ID, category, shelfLifeDays);
+  setCategoryDefault(category: FoodBatch["category"], shelfLifeDays: number, storageLocation: FoodBatch["storageLocation"]) {
+    this.db.prepare(`INSERT INTO category_defaults (household_id, category, shelf_life_days, storage_location) VALUES (?, ?, ?, ?)
+      ON CONFLICT(household_id, category) DO UPDATE SET shelf_life_days = excluded.shelf_life_days, storage_location = excluded.storage_location`).run(this.householdId, category, shelfLifeDays, storageLocation);
   }
 
   getCategoryDefault(category: FoodBatch["category"]): number | null {
-    const row = this.db.prepare("SELECT shelf_life_days FROM category_defaults WHERE household_id = ? AND category = ?").get(DEFAULT_HOUSEHOLD_ID, category) as { shelf_life_days: number } | undefined;
+    const row = this.db.prepare("SELECT shelf_life_days FROM category_defaults WHERE household_id = ? AND category = ?").get(this.householdId, category) as { shelf_life_days: number } | undefined;
     return row?.shelf_life_days ?? null;
+  }
+
+  listCategoryDefaults(): Array<{ category: FoodBatch["category"]; shelfLifeDays: number; storageLocation: FoodBatch["storageLocation"] }> {
+    const rows = this.db.prepare("SELECT category, shelf_life_days, storage_location FROM category_defaults WHERE household_id = ? ORDER BY category").all(this.householdId) as Array<{ category: FoodBatch["category"]; shelf_life_days: number; storage_location: FoodBatch["storageLocation"] }>;
+    return rows.map((row) => ({ category: row.category, shelfLifeDays: row.shelf_life_days, storageLocation: row.storage_location }));
+  }
+
+  autoConfirm(action: ProposalAction, idempotencyKey: string): ConfirmedWrite {
+    if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("无效的幂等键");
+    const existing = this.db.prepare("SELECT result_json FROM write_requests WHERE idempotency_key = ?").get(idempotencyKey) as { result_json: string } | undefined;
+    if (existing) return { ...(JSON.parse(existing.result_json) as ConfirmedWrite), idempotent: true };
+    const proposal = this.createProposal(action);
+    return this.confirmProposal(proposal.id, idempotencyKey);
   }
 
   listBatches(today = todayInShanghai()): FoodBatchWithStatus[] {
     const rows = this.db.prepare(`SELECT * FROM food_batches WHERE household_id = ? AND deleted_at IS NULL AND quantity > 0
-      ORDER BY expires_at ASC, created_at DESC`).all(DEFAULT_HOUSEHOLD_ID) as BatchRow[];
+      ORDER BY expires_at ASC, created_at DESC`).all(this.householdId) as BatchRow[];
     return rows.map((row) => ({ ...toBatch(row), status: statusForExpiration(row.expires_at, today) }));
   }
 
   getBatch(batchId: string): FoodBatch | null {
-    const row = this.db.prepare("SELECT * FROM food_batches WHERE id = ? AND household_id = ? AND deleted_at IS NULL").get(batchId, DEFAULT_HOUSEHOLD_ID) as BatchRow | undefined;
+    const row = this.db.prepare("SELECT * FROM food_batches WHERE id = ? AND household_id = ? AND deleted_at IS NULL").get(batchId, this.householdId) as BatchRow | undefined;
     return row ? toBatch(row) : null;
   }
 
@@ -130,7 +151,7 @@ export class InventoryStore {
     const id = randomUUID();
     const expiresAt = new Date(now.getTime() + PROPOSAL_TTL_MS).toISOString();
     this.db.prepare("INSERT INTO operation_proposals (id, household_id, action_json, state, expires_at, created_at) VALUES (?, ?, ?, 'pending', ?, ?)")
-      .run(id, DEFAULT_HOUSEHOLD_ID, JSON.stringify(normalized), expiresAt, now.toISOString());
+      .run(id, this.householdId, JSON.stringify(normalized), expiresAt, now.toISOString());
     return { id, action: normalized, expiresAt };
   }
 
@@ -140,7 +161,7 @@ export class InventoryStore {
     if (existing) return { ...(JSON.parse(existing.result_json) as ConfirmedWrite), idempotent: true };
 
     const run = this.db.transaction(() => {
-      const row = this.db.prepare("SELECT * FROM operation_proposals WHERE id = ? AND household_id = ?").get(proposalId, DEFAULT_HOUSEHOLD_ID) as ProposalRow | undefined;
+      const row = this.db.prepare("SELECT * FROM operation_proposals WHERE id = ? AND household_id = ?").get(proposalId, this.householdId) as ProposalRow | undefined;
       if (!row) throw new Error("找不到待确认操作");
       if (new Date(row.expires_at) < now) throw new Error("此操作已过期，请重新确认");
       const state = this.db.prepare("SELECT state FROM operation_proposals WHERE id = ?").get(proposalId) as { state: string };
@@ -164,7 +185,7 @@ export class InventoryStore {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
         return action.batches.map((batch) => {
           const id = randomUUID();
-          insert.run(id, DEFAULT_HOUSEHOLD_ID, batch.name, batch.category, batch.quantity, batch.unit, batch.purchasedAt, batch.expiresAt, batch.storageLocation, batch.opened ? 1 : 0, timestamp, timestamp);
+          insert.run(id, this.householdId, batch.name, batch.category, batch.quantity, batch.unit, batch.purchasedAt, batch.expiresAt, batch.storageLocation, batch.opened ? 1 : 0, timestamp, timestamp);
           return id;
         });
       }
@@ -242,7 +263,8 @@ function createDefaultStore(): InventoryStore {
 
 const globalForStore = globalThis as unknown as { inventoryStore?: InventoryStore };
 
-export function getInventoryStore(): InventoryStore {
+export function getInventoryStore(householdId = DEFAULT_HOUSEHOLD_ID): InventoryStore {
   if (!globalForStore.inventoryStore) globalForStore.inventoryStore = createDefaultStore();
-  return globalForStore.inventoryStore;
+  if (householdId === DEFAULT_HOUSEHOLD_ID) return globalForStore.inventoryStore;
+  return new InventoryStore(openAppDatabase(), householdId);
 }

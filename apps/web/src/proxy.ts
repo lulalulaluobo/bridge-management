@@ -1,0 +1,14 @@
+import { NextResponse, type NextRequest } from "next/server";
+
+const cookieName = "fridge_household";
+
+export function proxy(request: NextRequest) {
+  const householdId = request.cookies.get(cookieName)?.value ?? crypto.randomUUID();
+  const headers = new Headers(request.headers);
+  headers.set("x-fridge-household-id", householdId);
+  const response = NextResponse.next({ request: { headers } });
+  if (!request.cookies.get(cookieName)) response.cookies.set(cookieName, householdId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
+  return response;
+}
+
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|icons/|sw.js|swe-worker).*)"] };

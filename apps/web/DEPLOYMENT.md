@@ -36,3 +36,7 @@ Authorization: Bearer <CRON_SECRET>
 ## 安卓 Chrome 最终验收
 
 在真实手机上逐项记录：HTTPS 打开、Manifest 可见、安装、桌面启动、相机、录音、通知授权、文字入库预览与确认、页面刷新数据保持、Service Worker 更新提示。改变 Manifest 或图标后，需要卸载旧应用并清理浏览器缓存后重新安装。
+
+## 局域网 HTTPS 与本地语音测试
+
+仅限开发机测试：`deploy/nginx-lan.conf` 在 8443 提供 Nginx HTTPS 反向代理，8080 仅提供本地 CA 下载。先启动 `services/local-asr`，再以 `LOCAL_ASR_URL=http://127.0.0.1:8787` 启动 Web App。手机须安装该开发 CA，且能解析开发机的 `.local` 名称；这套证书不可用于正式分发，正式环境必须改用可信公网 CA。

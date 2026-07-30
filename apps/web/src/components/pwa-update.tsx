@@ -26,5 +26,5 @@ export function PwaUpdate() {
   }, []);
 
   if (!updateReady) return null;
-  return <button type="button" onClick={() => window.location.reload()} className="fixed inset-x-4 bottom-[calc(16px+env(safe-area-inset-bottom))] z-50 rounded-2xl bg-[#173f35] px-4 py-3 text-left text-sm font-semibold text-white shadow-xl">有新版本可用，点此更新应用</button>;
+  return <button type="button" onClick={() => window.location.reload()} className="fixed inset-x-4 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-50 rounded-2xl bg-[#173f35] px-4 py-3 text-left text-sm font-semibold text-white shadow-xl">有新版本可用，点此更新应用</button>;
 }
