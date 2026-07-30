@@ -18,7 +18,7 @@ const decisionSchema = z.object({
 
 const agentRequestSchema = z.object({
   message: z.string().trim().min(1).max(1000),
-  context: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(1000) })).max(8).optional(),
+  context: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(1000), status: z.enum(["pending", "committed"]).optional() })).max(500).optional(),
   idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
@@ -69,15 +69,15 @@ export async function respondToUser(input: unknown, householdId = "default-house
 
 function commitAction(store: ReturnType<typeof getInventoryStore>, action: ProposalAction, idempotencyKey: string | undefined, householdId: string): AgentResponse {
   if (action.type === "add_batches" && !getAgentSettingsStore(householdId).get().naturalLanguageAutoSave) {
-    const reply = "已识别食材；语音自动入库目前已关闭。";
-    return { message: reply, speech: reply, mode: "reply", proposal: null, committed: null };
+    const reply = "已识别食材，请确认是否入库。";
+    return { message: reply, speech: reply, mode: "propose", proposal: store.createProposal(action), committed: null };
   }
   const committed = store.autoConfirm(action, idempotencyKey ?? randomUUID());
   const reply = formatCommittedAction(committed);
   return { message: reply, speech: reply, mode: "reply", proposal: null, committed };
 }
 
-async function requestStructuredDecision(apiKey: string, model: string, message: string, context: Array<{ role: "user" | "assistant"; content: string }>, inventory: unknown[], defaults: unknown[], foodDefaults: unknown[], provider: "openai" | "deepseek", currentDate: string) {
+async function requestStructuredDecision(apiKey: string, model: string, message: string, context: Array<{ role: "user" | "assistant"; content: string; status?: "pending" | "committed" }>, inventory: unknown[], defaults: unknown[], foodDefaults: unknown[], provider: "openai" | "deepseek", currentDate: string) {
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -97,7 +97,7 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
       response_format: provider === "deepseek" ? { type: "json_object" } : { type: "json_schema", json_schema: { name: "fridge_agent_decision", strict: false, schema } },
       messages: [
         { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将“今天/明天”等相对日期转换成 YYYY-MM-DD。用户说“买了/新买/入库”时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用“其他”。用户不必说存放位置或过期日：先匹配“食物默认规则”中同名的规则，再使用“类别默认规则”；存放位置必须取匹配规则的值。未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按同一优先级计算。写入会由后端直接执行，message 不要要求确认。message 里有多个项目时每个项目独占一行，绝不把清单串成一大段。speech 是给语音播报的一句短话，最多 40 个汉字；用户问库存时只说食物名称和数量，绝不说位置或日期。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
-        ...(context.length ? [{ role: "system" as const, content: `本次会话最近上下文（仅用来理解代词、补充信息和追问）：${JSON.stringify(context)}` }] : []),
+        ...(context.length ? [{ role: "system" as const, content: `本次库存录入会话完整上下文：${JSON.stringify(context)}。重点处理 status=pending 的食材、纠错与补充，已 committed 的内容只用于理解指代、纠错和写入总结；绝不能因后续纠正丢掉此前仍 pending 的其他食材。` }] : []),
         { role: "system", content: `食物默认规则 JSON：${JSON.stringify(foodDefaults)}` },
         { role: "system", content: `类别默认规则 JSON：${JSON.stringify(defaults)}` },
         { role: "system", content: `当前库存 JSON：${JSON.stringify(inventory)}` },
