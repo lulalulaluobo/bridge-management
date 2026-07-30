@@ -37,6 +37,18 @@ describe("InventoryStore", () => {
     expect(store.listBatches()).toHaveLength(1);
   });
 
+  it("提供可编辑的类别默认位置，并可安全自动入库", () => {
+    const store = createStore();
+    expect(store.listCategoryDefaults().find((item) => item.category === "主食")).toMatchObject({ shelfLifeDays: 30, storageLocation: "常温柜" });
+    const action = { type: "add_batches" as const, batches: [{ name: "大米", category: "主食" as const, quantity: 1, unit: "袋", purchasedAt: "2026-07-30", storageLocation: "常温柜" as const, opened: false }] };
+    const first = store.autoConfirm(action, "voice-auto-save");
+    const second = store.autoConfirm(action, "voice-auto-save");
+
+    expect(first.action.type).toBe("add_batches");
+    expect(second.idempotent).toBe(true);
+    expect(store.listBatches("2026-07-30")).toHaveLength(1);
+  });
+
   it("软删除后不出现在默认库存", () => {
     const store = createStore();
     const add = store.createProposal({
