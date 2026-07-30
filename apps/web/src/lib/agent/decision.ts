@@ -52,7 +52,7 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
     body: JSON.stringify({
       model,
       temperature: 0.2,
-      response_format: { type: "json_schema", json_schema: { name: "fridge_agent_decision", strict: true, schema } },
+      response_format: { type: "json_schema", json_schema: { name: "fridge_agent_decision", strict: false, schema } },
       messages: [
         { role: "system", content: "你是家庭冰箱管理 Agent。只能在用户明确要求写入时输出 action；所有 action 都只是待确认草案，绝不声称已写入。库存查询直接回答。信息不足时 mode=clarify 且 action=null。不要编造库存批次 ID。" },
         { role: "system", content: `当前库存 JSON：${JSON.stringify(inventory)}` },

@@ -10,7 +10,9 @@ import {
 } from "@/lib/inventory/types";
 import type { CredentialSummary } from "@/lib/llm/credentials";
 import { LlmSettings } from "@/components/llm-settings";
+import { MealRecommendations } from "@/components/meal-recommendations";
 import type { FoodCandidate } from "@/lib/media/recognition";
+import type { FoodPreferences } from "@/lib/preferences";
 
 type AddForm = {
   name: string;
@@ -39,7 +41,7 @@ const initialForm: AddForm = {
   opened: false,
 };
 
-export function InventoryDashboard({ initialBatches, initialCredentials }: { initialBatches: FoodBatchWithStatus[]; initialCredentials: CredentialSummary[] }) {
+export function InventoryDashboard({ initialBatches, initialCredentials, initialPreferences }: { initialBatches: FoodBatchWithStatus[]; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences }) {
   const [batches, setBatches] = useState<FoodBatchWithStatus[]>(initialBatches);
   const [form, setForm] = useState<AddForm>(initialForm);
   const [proposal, setProposal] = useState<OperationProposal | null>(null);
@@ -261,6 +263,7 @@ export function InventoryDashboard({ initialBatches, initialCredentials }: { ini
       </section>
 
       <LlmSettings initialCredentials={initialCredentials} />
+      <MealRecommendations initialPreferences={initialPreferences} />
     </main>
   );
 }

@@ -30,7 +30,7 @@ export async function recognizeFoodImage(file: File): Promise<FoodCandidate[]> {
     body: JSON.stringify({
       model: credential.visionModel,
       temperature: 0,
-      response_format: { type: "json_schema", json_schema: { name: "food_candidates", strict: true, schema: candidatesSchema.toJSONSchema({ target: "draft-7" }) } },
+      response_format: { type: "json_schema", json_schema: { name: "food_candidates", strict: false, schema: candidatesSchema.toJSONSchema({ target: "draft-7" }) } },
       messages: [{ role: "system", content: "识别本次采购的食物。只返回看得见或高度确定的食物；数量不确定时用 1，所有结果都是用户确认前的候选。" }, { role: "user", content: [{ type: "text", text: "请识别这张采购食物照片。" }, { type: "image_url", image_url: { url: image } }] }],
     }),
   });
