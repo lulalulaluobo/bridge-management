@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 export function AgentWriteSettings() {
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [notice, setNotice] = useState("");
 
   useEffect(() => { void fetch("/api/settings/agent").then(async (response) => {
@@ -16,8 +16,8 @@ export function AgentWriteSettings() {
     const response = await fetch("/api/settings/agent", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ naturalLanguageAutoSave: next }) });
     if (!response.ok) { setNotice("无法保存写入设置"); return; }
     setEnabled(next);
-    setNotice(next ? "已开启自然语言自动入库" : "已关闭自动入库，之后会再次确认");
+    setNotice(next ? "已开启语音自动入库" : "已关闭语音自动入库");
   }
 
-  return <section className="rounded-3xl bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold">自然语言自动入库</h2><p className="mt-1 text-sm leading-6 text-slate-600">开启后，说“买了牛奶”会按默认位置和有效期直接写入；关闭时仍显示二次确认。</p></div><button type="button" role="switch" aria-checked={enabled} onClick={() => void update(!enabled)} className={`relative mt-1 h-8 w-14 rounded-full transition-colors ${enabled ? "bg-[#173f35]" : "bg-slate-300"}`} aria-label="切换自然语言自动入库"><span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-7" : "translate-x-1"}`} /></button></div>{notice && <p className="mt-3 text-sm text-slate-600" role="status">{notice}</p>}</section>;
+  return <section className="rounded-3xl bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">语音自动入库</h2><p className="mt-1 text-sm leading-6 text-slate-600">说“买了牛奶”会按默认规则直接写入库存；关闭后只识别、不写入。</p></div><button type="button" role="switch" aria-checked={enabled} onClick={() => void update(!enabled)} className={`relative inline-flex h-10 w-[4.5rem] shrink-0 items-center rounded-full p-1 shadow-inner transition-colors ${enabled ? "bg-[#173f35]" : "bg-[#dfe5df]"}`} aria-label="切换语音自动入库"><span className={`grid h-8 w-8 place-items-center rounded-full bg-white text-xs font-bold shadow-[0_2px_6px_rgba(23,63,53,.18)] transition-transform ${enabled ? "translate-x-8 text-[#173f35]" : "translate-x-0 text-[#718078]"}`}>{enabled ? "开" : "关"}</span></button></div>{notice && <p className="mt-3 text-sm text-slate-600" role="status">{notice}</p>}</section>;
 }

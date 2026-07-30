@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeDecision } from "@/lib/agent/decision";
+import { formatInventoryReply, formatInventorySpeech, normalizeDecision } from "@/lib/agent/decision";
 import { proposalActionSchema } from "@/lib/inventory/types";
 
 describe("agent decision normalization", () => {
@@ -10,5 +10,11 @@ describe("agent decision normalization", () => {
     });
     const action = (value as { action: unknown }).action;
     expect(proposalActionSchema.parse(action)).toMatchObject({ type: "add_batches", batches: [{ name: "牛奶" }] });
+  });
+
+  it("formats inventory display by line and speech without storage details", () => {
+    const inventory = [{ name: "牛奶", quantity: 2, unit: "盒" }, { name: "鸡蛋", quantity: 6, unit: "个" }];
+    expect(formatInventoryReply(inventory)).toBe("当前库存\n牛奶2盒\n鸡蛋6个");
+    expect(formatInventorySpeech(inventory)).toBe("现在有牛奶2盒、鸡蛋6个。");
   });
 });

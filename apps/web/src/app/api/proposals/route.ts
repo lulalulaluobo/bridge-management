@@ -9,9 +9,11 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const action = proposalActionSchema.parse(await request.json());
-    return NextResponse.json({ proposal: getInventoryStore(await currentHouseholdId()).createProposal(action) }, { status: 201 });
+    const body = await request.json() as { action?: unknown; idempotencyKey?: unknown };
+    const action = proposalActionSchema.parse(body.action ?? body);
+    if (typeof body.idempotencyKey !== "string" || !body.idempotencyKey) throw new Error("缺少幂等键");
+    return NextResponse.json({ result: getInventoryStore(await currentHouseholdId()).autoConfirm(action, body.idempotencyKey) }, { status: 201 });
   } catch (error) {
-    return errorResponse(error, "无法创建待确认操作");
+    return errorResponse(error, "无法写入库存");
   }
 }

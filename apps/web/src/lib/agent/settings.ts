@@ -13,14 +13,14 @@ export class AgentSettingsStore {
   constructor(private readonly householdId = defaultHouseholdId) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS agent_settings (
       household_id TEXT PRIMARY KEY,
-      natural_language_auto_save INTEGER NOT NULL DEFAULT 0 CHECK (natural_language_auto_save IN (0, 1)),
+      natural_language_auto_save INTEGER NOT NULL DEFAULT 1 CHECK (natural_language_auto_save IN (0, 1)),
       updated_at TEXT NOT NULL
     )`);
   }
 
   get(): AgentSettings {
     const row = this.db.prepare("SELECT natural_language_auto_save FROM agent_settings WHERE household_id = ?").get(this.householdId) as { natural_language_auto_save: number } | undefined;
-    return { naturalLanguageAutoSave: Boolean(row?.natural_language_auto_save) };
+    return { naturalLanguageAutoSave: row ? Boolean(row.natural_language_auto_save) : true };
   }
 
   save(naturalLanguageAutoSave: boolean): AgentSettings {

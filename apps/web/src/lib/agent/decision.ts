@@ -7,10 +7,11 @@ import { z } from "zod";
 import { getAgentSettingsStore } from "@/lib/agent/settings";
 import { type ConfirmedWrite, getInventoryStore } from "@/lib/inventory/store";
 import { getCredentialStore } from "@/lib/llm/credentials";
-import { proposalActionSchema, type OperationProposal } from "@/lib/inventory/types";
+import { foodCategories, proposalActionSchema, type FoodBatch, type OperationProposal, type ProposalAction } from "@/lib/inventory/types";
 
 const decisionSchema = z.object({
   message: z.string().min(1).max(800),
+  speech: z.string().min(1).max(180).optional(),
   mode: z.enum(["reply", "clarify", "propose"]),
   action: proposalActionSchema.nullable(),
 });
@@ -23,6 +24,7 @@ const agentRequestSchema = z.object({
 
 export type AgentResponse = {
   message: string;
+  speech: string;
   mode: "reply" | "clarify" | "propose";
   proposal: OperationProposal | null;
   committed: ConfirmedWrite | null;
@@ -30,27 +32,52 @@ export type AgentResponse = {
 
 export async function respondToUser(input: unknown, householdId = "default-household"): Promise<AgentResponse> {
   const { message, context = [], idempotencyKey } = agentRequestSchema.parse(input);
-  const credential = getCredentialStore(householdId).getDecryptedChatCredential();
-  if (!credential) {
-    return { message: "智能对话尚未配置。你仍可用下方手动入库；完成高级设置中的模型 Key 后，我就能理解自然语言、照片和语音。", mode: "reply", proposal: null, committed: null };
-  }
-
-  const inventory = getInventoryStore(householdId).listBatches().slice(0, 80).map((batch) => ({
+  const store = getInventoryStore(householdId);
+  const inventory = store.listBatches().slice(0, 80).map((batch) => ({
     id: batch.id, name: batch.name, quantity: batch.quantity, unit: batch.unit, expiresAt: batch.expiresAt, storageLocation: batch.storageLocation, opened: batch.opened,
   }));
-  const currentDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const store = getInventoryStore(householdId);
-  const defaults = store.listCategoryDefaults();
-  const decision = await requestStructuredDecision(credential.apiKey, credential.chatModel, message, context, inventory, defaults, credential.provider, currentDate);
-  if (decision.mode !== "propose" || !decision.action) return { message: decision.message, mode: decision.mode, proposal: null, committed: null };
-  if (decision.action.type === "add_batches" && getAgentSettingsStore(householdId).get().naturalLanguageAutoSave) {
-    const committed = store.autoConfirm(decision.action, idempotencyKey ?? randomUUID());
-    return { message: formatCommittedPurchase(committed), mode: "reply", proposal: null, committed };
+  if (isInventoryQuestion(message)) {
+    return { message: formatInventoryReply(inventory), speech: formatInventorySpeech(inventory), mode: "reply", proposal: null, committed: null };
   }
-  return { message: decision.message, mode: "propose", proposal: store.createProposal(decision.action), committed: null };
+  const credential = getCredentialStore(householdId).getDecryptedChatCredential();
+  if (!credential) {
+    const reply = "智能对话尚未配置。你仍可手动添加食材。";
+    return { message: reply, speech: reply, mode: "reply", proposal: null, committed: null };
+  }
+  const currentDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const defaults = store.listCategoryDefaults();
+  const foodDefaults = store.listFoodDefaultRules();
+  const fallbackAction = () => fallbackPurchaseAction(message, currentDate, defaults, foodDefaults);
+  let decision: z.infer<typeof decisionSchema> | null = null;
+  try {
+    decision = await requestStructuredDecision(credential.apiKey, credential.chatModel, message, context, inventory, defaults, foodDefaults, credential.provider, currentDate);
+  } catch (error) {
+    const action = fallbackAction();
+    if (!action) throw error;
+    return commitAction(store, action, idempotencyKey, householdId);
+  }
+  const action = decision.action ?? fallbackAction();
+  if (!action) {
+    if (isPurchaseRequest(message)) {
+      const reply = "没有识别到明确食材，未写入库存。";
+      return { message: reply, speech: reply, mode: "clarify", proposal: null, committed: null };
+    }
+    return { message: decision.message, speech: decision.speech ?? decision.message, mode: decision.mode, proposal: null, committed: null };
+  }
+  return commitAction(store, action, idempotencyKey, householdId);
 }
 
-async function requestStructuredDecision(apiKey: string, model: string, message: string, context: Array<{ role: "user" | "assistant"; content: string }>, inventory: unknown[], defaults: unknown[], provider: "openai" | "deepseek", currentDate: string) {
+function commitAction(store: ReturnType<typeof getInventoryStore>, action: ProposalAction, idempotencyKey: string | undefined, householdId: string): AgentResponse {
+  if (action.type === "add_batches" && !getAgentSettingsStore(householdId).get().naturalLanguageAutoSave) {
+    const reply = "已识别食材；语音自动入库目前已关闭。";
+    return { message: reply, speech: reply, mode: "reply", proposal: null, committed: null };
+  }
+  const committed = store.autoConfirm(action, idempotencyKey ?? randomUUID());
+  const reply = formatCommittedAction(committed);
+  return { message: reply, speech: reply, mode: "reply", proposal: null, committed };
+}
+
+async function requestStructuredDecision(apiKey: string, model: string, message: string, context: Array<{ role: "user" | "assistant"; content: string }>, inventory: unknown[], defaults: unknown[], foodDefaults: unknown[], provider: "openai" | "deepseek", currentDate: string) {
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -69,8 +96,9 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
       temperature: 0.2,
       response_format: provider === "deepseek" ? { type: "json_object" } : { type: "json_schema", json_schema: { name: "fridge_agent_decision", strict: false, schema } },
       messages: [
-        { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将“今天/明天”等相对日期转换成 YYYY-MM-DD。用户说“买了/新买/入库”时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用“其他”。用户不必说存放位置或过期日：存放位置必须从“类别默认规则”中取对应值；未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按类别默认有效期计算。message 只需简短说明你理解到的内容，不要要求点击确认，也不要编造已经写入的结果；是否自动写入由用户设置和后端决定。库存查询直接回答。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
+        { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将“今天/明天”等相对日期转换成 YYYY-MM-DD。用户说“买了/新买/入库”时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用“其他”。用户不必说存放位置或过期日：先匹配“食物默认规则”中同名的规则，再使用“类别默认规则”；存放位置必须取匹配规则的值。未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按同一优先级计算。写入会由后端直接执行，message 不要要求确认。message 里有多个项目时每个项目独占一行，绝不把清单串成一大段。speech 是给语音播报的一句短话，最多 40 个汉字；用户问库存时只说食物名称和数量，绝不说位置或日期。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
         ...(context.length ? [{ role: "system" as const, content: `本次会话最近上下文（仅用来理解代词、补充信息和追问）：${JSON.stringify(context)}` }] : []),
+        { role: "system", content: `食物默认规则 JSON：${JSON.stringify(foodDefaults)}` },
         { role: "system", content: `类别默认规则 JSON：${JSON.stringify(defaults)}` },
         { role: "system", content: `当前库存 JSON：${JSON.stringify(inventory)}` },
         { role: "user", content: message },
@@ -88,10 +116,65 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
   }
 }
 
-function formatCommittedPurchase(committed: ConfirmedWrite) {
-  if (committed.action.type !== "add_batches") return "已更新冰箱库存。";
-  const batches = committed.action.batches.map((batch) => `${batch.name}${batch.quantity}${batch.unit}，放在${batch.storageLocation}，预计${batch.expiresAt}过期`);
-  return `已帮你记下：${batches.join("；")}。`;
+function formatCommittedAction(committed: ConfirmedWrite) {
+  if (committed.action.type === "add_batches") return `已记下：${committed.action.batches.map((batch) => `${batch.name}${batch.quantity}${batch.unit}`).join("、")}。`;
+  if (committed.action.type === "consume_batch") return "已记录消耗。";
+  if (committed.action.type === "soft_delete_batch") return "已从库存移除。";
+  return "已更新库存。";
+}
+
+function isInventoryQuestion(message: string) {
+  const text = message.replace(/\s+/g, "");
+  return /^(有什么|有哪些|还剩|剩下)/.test(text) || /(?:库存|冰箱).*(?:有什么|有哪些|还剩|剩下)/.test(text);
+}
+
+function isPurchaseRequest(message: string) {
+  return /(买了|买到|新买|采购|入库)/.test(message);
+}
+
+export function fallbackPurchaseAction(message: string, purchasedAt: string, defaults: Array<{ category: FoodBatch["category"]; shelfLifeDays: number; storageLocation: FoodBatch["storageLocation"] }>, foodDefaults: Array<{ name: string; shelfLifeDays: number; storageLocation: FoodBatch["storageLocation"] }>): ProposalAction | null {
+  const trigger = message.match(/(?:买了|买到|新买(?:了)?|采购(?:了)?|入库(?:了)?)\s*([^，。！？!\n]+)/);
+  if (!trigger) return null;
+  const raw = trigger[1].trim().replace(/(回来|了)$/u, "");
+  if (!raw || /[、和及]/u.test(raw)) return null;
+  const measured = raw.match(/^([0-9]+(?:\.[0-9]+)?|[一二两三四五六七八九十])\s*(斤|盒|袋|个|瓶|包|份|条|块|只|支|克|公斤|千克)\s*(.+)$/u);
+  const quantity = measured ? parseChineseNumber(measured[1]) : 1;
+  const unit = measured?.[2] ?? "份";
+  const name = (measured?.[3] ?? raw).trim();
+  if (!name || !Number.isFinite(quantity) || quantity <= 0) return null;
+  const exact = foodDefaults.find((rule) => rule.name === name);
+  const category = inferCategory(name);
+  const categoryDefault = defaults.find((rule) => rule.category === category);
+  return { type: "add_batches", batches: [{ name, category, quantity, unit, purchasedAt, storageLocation: exact?.storageLocation ?? categoryDefault?.storageLocation ?? "冷藏室", opened: false }] };
+}
+
+function parseChineseNumber(value: string) {
+  if (/^\d/.test(value)) return Number(value);
+  const values: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  return values[value] ?? Number.NaN;
+}
+
+function inferCategory(name: string): FoodBatch["category"] {
+  if (/(牛|猪|羊|鸡|鸭|肉|排|肠|培根)/u.test(name)) return "肉类";
+  if (/(鱼|虾|蟹|贝|蛤|海鲜)/u.test(name)) return "海鲜";
+  if (/(奶|酸奶|芝士|黄油)/u.test(name)) return "乳制品";
+  if (/(米|面|粉|面包|馒头|饼)/u.test(name)) return "主食";
+  if (/(果|苹果|橙|蕉|梨|葡萄|莓)/u.test(name)) return "水果";
+  if (/(菜|瓜|椒|豆|菠菜|番茄|土豆|萝卜|菌)/u.test(name)) return "蔬菜";
+  if (/(水|茶|咖啡|饮料|可乐|果汁)/u.test(name)) return "饮料";
+  return foodCategories.includes(name as FoodBatch["category"]) ? name as FoodBatch["category"] : "其他";
+}
+
+export function formatInventoryReply(inventory: Array<{ name: string; quantity: number; unit: string }>) {
+  if (!inventory.length) return "冰箱现在是空的。";
+  const names = inventory.slice(0, 8).map((batch) => `${batch.name}${batch.quantity}${batch.unit}`);
+  return `当前库存\n${names.join("\n")}${inventory.length > names.length ? "\n还有其他食材" : ""}`;
+}
+
+export function formatInventorySpeech(inventory: Array<{ name: string; quantity: number; unit: string }>) {
+  if (!inventory.length) return "冰箱现在是空的。";
+  const names = inventory.slice(0, 8).map((batch) => `${batch.name}${batch.quantity}${batch.unit}`);
+  return `现在有${names.join("、")}${inventory.length > names.length ? "等" : ""}。`;
 }
 
 export function normalizeDecision(value: unknown) {

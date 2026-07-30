@@ -65,6 +65,13 @@ export class InventoryStore {
         storage_location TEXT NOT NULL DEFAULT '冷藏室',
         PRIMARY KEY (household_id, category)
       );
+      CREATE TABLE IF NOT EXISTS food_default_rules (
+        household_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        shelf_life_days INTEGER NOT NULL CHECK (shelf_life_days >= 0),
+        storage_location TEXT NOT NULL,
+        PRIMARY KEY (household_id, name)
+      );
       CREATE TABLE IF NOT EXISTS food_batches (
         id TEXT PRIMARY KEY,
         household_id TEXT NOT NULL,
@@ -125,6 +132,20 @@ export class InventoryStore {
   listCategoryDefaults(): Array<{ category: FoodBatch["category"]; shelfLifeDays: number; storageLocation: FoodBatch["storageLocation"] }> {
     const rows = this.db.prepare("SELECT category, shelf_life_days, storage_location FROM category_defaults WHERE household_id = ? ORDER BY category").all(this.householdId) as Array<{ category: FoodBatch["category"]; shelf_life_days: number; storage_location: FoodBatch["storageLocation"] }>;
     return rows.map((row) => ({ category: row.category, shelfLifeDays: row.shelf_life_days, storageLocation: row.storage_location }));
+  }
+
+  listFoodDefaultRules(): Array<{ name: string; shelfLifeDays: number; storageLocation: FoodBatch["storageLocation"] }> {
+    const rows = this.db.prepare("SELECT name, shelf_life_days, storage_location FROM food_default_rules WHERE household_id = ? ORDER BY name").all(this.householdId) as Array<{ name: string; shelf_life_days: number; storage_location: FoodBatch["storageLocation"] }>;
+    return rows.map((row) => ({ name: row.name, shelfLifeDays: row.shelf_life_days, storageLocation: row.storage_location }));
+  }
+
+  setFoodDefaultRule(name: string, shelfLifeDays: number, storageLocation: FoodBatch["storageLocation"]) {
+    this.db.prepare(`INSERT INTO food_default_rules (household_id, name, shelf_life_days, storage_location) VALUES (?, ?, ?, ?)
+      ON CONFLICT(household_id, name) DO UPDATE SET shelf_life_days = excluded.shelf_life_days, storage_location = excluded.storage_location`).run(this.householdId, name.trim(), shelfLifeDays, storageLocation);
+  }
+
+  deleteFoodDefaultRule(name: string) {
+    this.db.prepare("DELETE FROM food_default_rules WHERE household_id = ? AND name = ?").run(this.householdId, name.trim());
   }
 
   autoConfirm(action: ProposalAction, idempotencyKey: string): ConfirmedWrite {
@@ -228,7 +249,7 @@ function normalizeAction(action: ProposalAction, store: InventoryStore): Proposa
 }
 
 function resolveExpiresAt(batch: BatchInput, store: InventoryStore): string {
-  const defaultDays = store.getCategoryDefault(batch.category);
+  const defaultDays = store.listFoodDefaultRules().find((rule) => rule.name === batch.name)?.shelfLifeDays ?? store.getCategoryDefault(batch.category);
   if (defaultDays === null) throw new Error(`未设置“${batch.category}”的默认有效期`);
   return addDays(batch.purchasedAt, defaultDays);
 }
