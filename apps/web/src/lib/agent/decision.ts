@@ -36,11 +36,11 @@ export async function respondToUser(input: unknown, householdId = "default-house
   const inventory = store.listBatches().slice(0, 80).map((batch) => ({
     id: batch.id, name: batch.name, quantity: batch.quantity, unit: batch.unit, expiresAt: batch.expiresAt, storageLocation: batch.storageLocation, opened: batch.opened,
   }));
-  if (isInventoryQuestion(message)) {
-    return { message: formatInventoryReply(inventory), speech: formatInventorySpeech(inventory), mode: "reply", proposal: null, committed: null };
-  }
   const credential = getCredentialStore(householdId).getDecryptedChatCredential();
   if (!credential) {
+    if (isInventoryQuestion(message)) {
+      return { message: formatInventoryReply(inventory), speech: formatInventorySpeech(inventory), mode: "reply", proposal: null, committed: null };
+    }
     const reply = "智能对话尚未配置。你仍可手动添加食材。";
     return { message: reply, speech: reply, mode: "reply", proposal: null, committed: null };
   }
@@ -100,7 +100,11 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
       temperature: 0.2,
       response_format: provider === "deepseek" ? { type: "json_object" } : { type: "json_schema", json_schema: { name: "fridge_agent_decision", strict: false, schema } },
       messages: [
-        { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将“今天/明天”等相对日期转换成 YYYY-MM-DD。用户说“买了/新买/入库”时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用“其他”。绝不能把“嗯、呃、啊、这个、那个、两个、一份、一些、东西”等语气词、代词或数量当成食物；食物名称不明确或不在用户本次对话中出现时，必须 mode=clarify 且 action=null，并反问具体食材。用户不必说存放位置或过期日：先匹配“食物默认规则”中同名的规则，再使用“类别默认规则”；存放位置必须取匹配规则的值。未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按同一优先级计算。写入会由后端直接执行，message 不要要求确认。message 里有多个项目时每个项目独占一行，绝不把清单串成一大段。speech 是给语音播报的一句短话，最多 40 个汉字；用户问库存时只说食物名称和数量，绝不说位置或日期。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
+        { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将"今天/明天"等相对日期转换成 YYYY-MM-DD。
+
+【查询库存】用户问库存时（如"有什么X""还剩什么X""哪些快过期""冷冻室有什么"），必须从当前库存 JSON 中按用户意图筛选匹配项后回复，绝不能无脑输出全部库存。筛选维度：类别（蔬菜/肉类/海鲜/乳制品/主食/水果/饮料等）、存放位置（冷藏室/冷冻室/常温柜等）、过期状态（将 expiresAt 与当前日期比较：已过期的、3天内过期的算"快过期"）、名称关键字模糊匹配。无匹配项时回复"没有找到相关食材"。用户说"有什么"但不加限定时列出全部库存摘要（最多8项）。查询只读不写，mode=reply、action=null。message 里多个项目时每个独占一行。speech 最多 40 个汉字，只说食物名称和数量，绝不说位置或日期。
+
+【写入库存】用户说"买了/新买/入库"时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用"其他"。绝不能把"嗯、呃、啊、这个、那个、两个、一份、一些、东西"等语气词、代词或数量当成食物；食物名称不明确或不在用户本次对话中出现时，必须 mode=clarify 且 action=null，并反问具体食材。用户不必说存放位置或过期日：先匹配"食物默认规则"中同名的规则，再使用"类别默认规则"；存放位置必须取匹配规则的值。未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按同一优先级计算。写入会由后端直接执行，message 不要要求确认。message 里有多个项目时每个项目独占一行，绝不把清单串成一大段。speech 是给语音播报的一句短话，最多 40 个汉字。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
         ...(context.length ? [{ role: "system" as const, content: `本次库存录入会话完整上下文：${JSON.stringify(context)}。重点处理 status=pending 的食材、纠错与补充，已 committed 的内容只用于理解指代、纠错和写入总结；绝不能因后续纠正丢掉此前仍 pending 的其他食材。` }] : []),
         { role: "system", content: `食物默认规则 JSON：${JSON.stringify(foodDefaults)}` },
         { role: "system", content: `类别默认规则 JSON：${JSON.stringify(defaults)}` },
