@@ -408,46 +408,47 @@ export function CookingModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="relative flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] bg-white shadow-2xl sm:rounded-[28px]">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f3f4f0] pb-24 text-[#17231f]">
+      <div className="mx-auto w-full max-w-xl">
         {/* Header photo & title */}
-        <div className="relative h-48 w-full shrink-0 bg-slate-800">
+        <div className="relative h-60 w-full bg-slate-800">
           {recipe.cover ? (
             <img src={recipe.cover} alt={recipe.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[#173f35] text-2xl font-bold text-white">
+            <div className="flex h-full w-full items-center justify-center bg-[#173f35] text-3xl font-bold text-white">
               {recipe.name}
             </div>
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
 
+          {/* Top Left Return Button */}
           <button
             type="button"
             onClick={onClose}
-            className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-black/50 text-white backdrop-blur-md"
+            className="absolute left-4 top-[max(1rem,env(safe-area-inset-top))] flex items-center gap-1.5 rounded-full bg-black/60 px-4 py-2 text-xs font-bold text-white shadow-lg backdrop-blur-md transition active:scale-95"
           >
-            ✕
+            ← 返回
           </button>
 
-          <div className="absolute bottom-3 left-4 right-4">
-            <h2 className="text-xl font-bold text-white">{recipe.name}</h2>
-            <div className="mt-1 flex items-center gap-2 text-xs font-medium text-amber-300">
+          <div className="absolute bottom-4 left-5 right-5">
+            <h2 className="text-2xl font-bold text-white tracking-tight">{recipe.name}</h2>
+            <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-amber-300">
               {recipe.score && <span>⭐ 下厨房 {recipe.score} 分</span>}
               {recipe.cooked && <span>· {recipe.cooked}</span>}
             </div>
           </div>
         </div>
 
-        {/* Content scroll */}
-        <div className="flex-1 overflow-y-auto p-5">
-          {/* Ingredients list */}
+        {/* Content Body */}
+        <div className="p-5">
+          {/* Ingredients */}
           {recipe.ingredients && recipe.ingredients.length > 0 && (
-            <section className="mb-6">
-              <h3 className="text-sm font-bold text-[#173f35]">🥗 用料清单</h3>
-              <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs">
+            <section className="mb-6 rounded-3xl bg-white p-5 shadow-[0_3px_14px_rgba(23,63,53,.05)]">
+              <h3 className="text-base font-bold text-[#173f35]">🥗 用料清单</h3>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                 {recipe.ingredients.map((ing, idx) => (
-                  <div key={idx} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-                    <span className="font-medium text-slate-800">{ing.name}</span>
+                  <div key={idx} className="flex items-center justify-between rounded-xl bg-[#f7f8f5] px-3.5 py-2.5">
+                    <span className="font-semibold text-slate-800">{ing.name}</span>
                     <span className="text-slate-500">{ing.unit}</span>
                   </div>
                 ))}
@@ -455,25 +456,25 @@ export function CookingModal({
             </section>
           )}
 
-          {/* Cooking steps */}
+          {/* Steps */}
           {recipe.steps && recipe.steps.length > 0 ? (
             <section className="mb-6">
-              <h3 className="text-sm font-bold text-[#173f35]">🍳 烹饪步骤</h3>
-              <div className="mt-3 grid gap-4">
+              <h3 className="mb-3 px-1 text-base font-bold text-[#173f35]">🍳 烹饪步骤</h3>
+              <div className="grid gap-4">
                 {recipe.steps.map((step) => (
-                  <div key={step.step} className="rounded-2xl border border-slate-100 bg-[#fbfcfb] p-3.5 shadow-sm">
+                  <div key={step.step} className="rounded-3xl border border-white/80 bg-white p-4 shadow-[0_3px_14px_rgba(23,63,53,.05)]">
                     <div className="flex items-center gap-2">
-                      <span className="grid h-6 w-6 place-items-center rounded-full bg-[#173f35] text-xs font-bold text-white">
+                      <span className="grid h-7 w-7 place-items-center rounded-full bg-[#173f35] text-xs font-bold text-white">
                         {step.step}
                       </span>
-                      <span className="text-xs font-semibold text-slate-600">步骤 {step.step}</span>
+                      <span className="text-xs font-bold text-slate-600">步骤 {step.step}</span>
                     </div>
 
-                    <p className="mt-2 text-sm leading-6 text-slate-800 whitespace-pre-line">{step.desc}</p>
+                    <p className="mt-3 text-sm leading-6 font-medium text-slate-800 whitespace-pre-line">{step.desc}</p>
 
                     {step.img && (
-                      <div className="mt-3 overflow-hidden rounded-xl bg-slate-100">
-                        <img src={step.img} alt={`步骤 ${step.step}`} referrerPolicy="no-referrer" className="max-h-64 w-full object-cover" />
+                      <div className="mt-3.5 overflow-hidden rounded-2xl bg-slate-100">
+                        <img src={step.img} alt={`步骤 ${step.step}`} referrerPolicy="no-referrer" className="max-h-72 w-full object-cover" />
                       </div>
                     )}
                   </div>

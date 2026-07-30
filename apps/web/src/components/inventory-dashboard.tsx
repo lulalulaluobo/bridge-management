@@ -17,6 +17,7 @@ import type { MealRecommendations as MealRecommendationsData } from "@/lib/recip
 
 type AddForm = { name: string; category: (typeof foodCategories)[number]; quantity: string; unit: string; purchasedAt: string; storageLocation: (typeof storageLocations)[number]; opened: boolean };
 type Tab = "today" | "inventory" | "recipes" | "more";
+type SubPage = "none" | "history" | "favorites";
 type HistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; detail: string; createdAt: string };
 type BatchChanges = Extract<ProposalAction, { type: "update_batch" }>["changes"];
 type AgentPhase = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
@@ -33,6 +34,7 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("today");
+  const [subPage, setSubPage] = useState<SubPage>("none");
   const [voiceReplies, setVoiceReplies] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingBatch, setEditingBatch] = useState<FoodBatchWithStatus | null>(null);
@@ -57,6 +59,11 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     }
   }
 
+  function changeTab(nextTab: Tab) {
+    setTab(nextTab);
+    setSubPage("none");
+  }
+
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 3600);
@@ -64,13 +71,17 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
   }, [notice]);
 
   useEffect(() => {
-    if (tab !== "today") return;
-    const { overflow } = document.documentElement.style;
+    const overflow = document.documentElement.style.overflow;
     const bodyOverflow = document.body.style.overflow;
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
+    if (tab === "today" && subPage === "none") {
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
+    } else {
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+    }
     return () => { document.documentElement.style.overflow = overflow; document.body.style.overflow = bodyOverflow; };
-  }, [tab]);
+  }, [tab, subPage]);
 
   async function queueAction(action: ProposalAction) {
     setBusy(true); setNotice("");
@@ -171,12 +182,16 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
   }
   function consume(batch: FoodBatchWithStatus) { const value = window.prompt(`消耗多少 ${batch.unit}？当前有 ${batch.quantity}${batch.unit}`, "1"); const quantity = Number(value); if (!value) return; if (!Number.isFinite(quantity) || quantity <= 0) { setNotice("请输入大于 0 的消耗数量"); return; } void queueAction({ type: "consume_batch", batchId: batch.id, quantity }); }
 
-  return <main className={tab === "today" ? "h-[100dvh] overflow-hidden bg-[#f3f4f0] text-[#17231f]" : "min-h-[100dvh] bg-[#f3f4f0] pb-36 text-[#17231f]"}>
-    <div className={`mx-auto w-full max-w-xl px-4 sm:px-5 pt-[max(1.2rem,env(safe-area-inset-top))] ${tab === "today" ? "h-full" : ""}`}>
-      {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
-      {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
-      {tab === "recipes" && <RecipesTab initialPreferences={initialPreferences} />}
-      {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} history={history} />}
+  return <main className={tab === "today" && subPage === "none" ? "h-[100dvh] overflow-hidden bg-[#f3f4f0] text-[#17231f]" : "min-h-[100dvh] bg-[#f3f4f0] pb-36 text-[#17231f]"}>
+    <div className={`mx-auto w-full max-w-xl px-4 sm:px-5 pt-[max(1.2rem,env(safe-area-inset-top))] ${tab === "today" && subPage === "none" ? "h-full" : ""}`}>
+      {subPage === "history" && <HistoryView items={history} onBack={() => setSubPage("none")} />}
+      {subPage === "favorites" && <FavoritesView onBack={() => setSubPage("none")} />}
+      {subPage === "none" && <>
+        {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
+        {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
+        {tab === "recipes" && <RecipesTab initialPreferences={initialPreferences} />}
+        {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} onOpenHistory={() => setSubPage("history")} onOpenFavorites={() => setSubPage("favorites")} />}
+      </>}
     </div>
     {notice && tab !== "today" && <p role="status" className="fixed inset-x-5 top-[max(1rem,env(safe-area-inset-top))] z-40 mx-auto max-w-md rounded-full bg-white/95 px-4 py-2 text-center text-sm font-medium text-[#405148] shadow-lg backdrop-blur-xl">{notice}</p>}
     {showAdd && <AddSheet form={form} setForm={setForm} busy={busy} onClose={() => setShowAdd(false)} onSubmit={createPreview} />}
@@ -184,7 +199,7 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     {agentProposal && <AgentConfirmSheet proposal={agentProposal} busy={busy} onCancel={() => setAgentProposal(null)} onConfirm={() => void confirmAgentProposal()} />}
     {photoCandidates && <PhotoCandidatesSheet candidates={photoCandidates} busy={busy} onClose={() => setPhotoCandidates(null)} onRecommend={(candidates) => void recommendFromPhoto(candidates)} onContinue={(candidates) => { setPhotoCandidates(null); void queueAction({ type: "add_batches", batches: candidates.map((item) => ({ ...item, purchasedAt: todayValue })) }); }} />}
     {photoRecommendations && <Sheet title="这些食材可以做什么？" onClose={() => setPhotoRecommendations(null)}><p className="-mt-2 text-sm leading-5 text-[#64736c]">照片食材尚未写入库存；以下建议仅供决定是否入库或做菜。</p><MealRecommendationCards recommendations={photoRecommendations} /></Sheet>}
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-[#f7f8f5]/90 px-4 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl"><div className="mx-auto grid max-w-xl grid-cols-4"><TabButton active={tab === "today"} label="今天" icon="home" onClick={() => setTab("today")} /><TabButton active={tab === "inventory"} label="库存" icon="grid" onClick={() => setTab("inventory")} /><TabButton active={tab === "recipes"} label="吃什么" icon="star" onClick={() => setTab("recipes")} /><TabButton active={tab === "more"} label="更多" icon="sliders" onClick={() => setTab("more")} /></div></nav>
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-[#f7f8f5]/90 px-4 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl"><div className="mx-auto grid max-w-xl grid-cols-4"><TabButton active={tab === "today" && subPage === "none"} label="今天" icon="home" onClick={() => changeTab("today")} /><TabButton active={tab === "inventory" && subPage === "none"} label="库存" icon="grid" onClick={() => changeTab("inventory")} /><TabButton active={tab === "recipes" && subPage === "none"} label="吃什么" icon="star" onClick={() => changeTab("recipes")} /><TabButton active={(tab === "more" || subPage !== "none")} label="更多" icon="sliders" onClick={() => changeTab("more")} /></div></nav>
   </main>;
 }
 
@@ -197,18 +212,15 @@ function RecipesTab({ initialPreferences }: { initialPreferences: FoodPreference
   </section>;
 }
 
-function MoreView({ username, initialCredentials, initialPreferences, vapidPublicKey, history }: { username: string; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string; history: HistoryItem[] }) {
-  const [showHistory, setShowHistory] = useState(false);
-  const [showFavorites, setShowFavorites] = useState(false);
-
+function MoreView({ username, initialCredentials, initialPreferences, vapidPublicKey, onOpenHistory, onOpenFavorites }: { username: string; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string; onOpenHistory: () => void; onOpenFavorites: () => void }) {
   return <section className="mt-7 grid gap-5">
     <div><h2 className="text-[25px] font-bold tracking-[-.04em]">更多</h2><p className="mt-1 text-sm text-[#6f8178]">偏好、提醒与模型设置</p></div>
     <div className="grid grid-cols-2 gap-3">
-      <button type="button" onClick={() => setShowFavorites(true)} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
+      <button type="button" onClick={onOpenFavorites} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600"><Icon name="star" /></div>
         <div><h3 className="text-sm font-bold text-[#173f35]">收藏菜谱</h3><p className="text-[11px] text-[#6f8178]">看页做饭指南</p></div>
       </button>
-      <button type="button" onClick={() => setShowHistory(true)} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
+      <button type="button" onClick={onOpenHistory} className="flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-[#173f35]"><Icon name="history" /></div>
         <div><h3 className="text-sm font-bold text-[#173f35]">操作记录</h3><p className="text-[11px] text-[#6f8178]">全家共享日志</p></div>
       </button>
@@ -218,17 +230,19 @@ function MoreView({ username, initialCredentials, initialPreferences, vapidPubli
     <NotificationControl vapidPublicKey={vapidPublicKey} />
     <ShelfLifeSettings />
     <LlmSettings initialCredentials={initialCredentials} />
-
-    {showHistory && <Sheet title="操作历史记录" onClose={() => setShowHistory(false)}><HistoryView items={history} embedded /></Sheet>}
-    {showFavorites && <Sheet title="我的收藏菜谱" onClose={() => setShowFavorites(false)}><FavoritesView embedded /></Sheet>}
   </section>;
 }
 
-function HistoryView({ items, embedded = false }: { items: HistoryItem[]; embedded?: boolean }) {
+function HistoryView({ items, embedded = false, onBack }: { items: HistoryItem[]; embedded?: boolean; onBack?: () => void }) {
   return <section className={embedded ? "" : "mt-7"}>
-    {!embedded && <><h2 className="text-[25px] font-bold tracking-[-.04em]">操作记录</h2><p className="mt-1 text-sm text-[#6f8178]">全家共享；可核对 Agent 实际执行的写库操作。</p></>}
+    {!embedded && <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        {onBack && <button type="button" onClick={onBack} className="flex items-center gap-1 rounded-full border border-white/80 bg-white/80 px-3.5 py-1.5 text-xs font-bold text-[#173f35] shadow-sm backdrop-blur-xl transition active:scale-95">← 返回</button>}
+        <div><h2 className="text-[25px] font-bold tracking-[-.04em]">操作历史记录</h2><p className="mt-0.5 text-sm text-[#6f8178]">全家共享；可核对 Agent 实际执行的写库操作。</p></div>
+      </div>
+    </div>}
     <div className={`${embedded ? "mt-2" : "mt-5"} overflow-hidden rounded-[24px] bg-white shadow-[0_3px_14px_rgba(23,63,53,.05)]`}>
-      {items.length ? items.map((item, index) => <article key={item.id} className={`px-4 py-3 ${index ? "border-t border-[#edf0eb]" : ""}`}><div className="flex items-start justify-between gap-3"><p className="min-w-0 font-semibold leading-6">{item.detail}</p><span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.source === "agent" ? "bg-[#dcece3] text-[#173f35]" : "bg-[#eef1ee] text-[#66756d]"}`}>{item.source === "agent" ? "Agent" : "手动"}</span></div><p className="mt-1 text-xs text-[#74827a]">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.createdAt))}</p></article>) : <p className="px-5 py-10 text-center text-sm text-[#74827a]">还没有操作记录。</p>}
+      {items.length ? items.map((item, index) => <article key={item.id} className={`px-4 py-3.5 ${index ? "border-t border-[#edf0eb]" : ""}`}><div className="flex items-start justify-between gap-3"><p className="min-w-0 font-semibold leading-6">{item.detail}</p><span className={`mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${item.source === "agent" ? "bg-[#dcece3] text-[#173f35]" : "bg-[#eef1ee] text-[#66756d]"}`}>{item.source === "agent" ? "Agent" : "手动"}</span></div><p className="mt-1 text-xs text-[#74827a]">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.createdAt))}</p></article>) : <p className="px-5 py-12 text-center text-sm text-[#74827a]">还没有操作记录。</p>}
     </div>
   </section>;
 }

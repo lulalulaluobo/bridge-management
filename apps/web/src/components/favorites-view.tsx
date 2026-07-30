@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { CookingModal } from "@/components/meal-recommendations";
 import type { SavedRecipe } from "@/lib/favorites";
 
-export function FavoritesView({ embedded = false }: { embedded?: boolean }) {
+export function FavoritesView({ embedded = false, onBack }: { embedded?: boolean; onBack?: () => void }) {
   const [recipes, setRecipes] = useState<SavedRecipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState<SavedRecipe | null>(null);
@@ -47,9 +47,20 @@ export function FavoritesView({ embedded = false }: { embedded?: boolean }) {
     <section className={embedded ? "" : "mt-7"}>
       {!embedded ? (
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">收藏菜谱</h2>
-            <p className="mt-1 text-sm text-[#6f8178]">{recipes.length} 道已收藏菜谱 · 照着页面轻松做饭</p>
+          <div className="flex items-center gap-3">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="flex items-center gap-1 rounded-full border border-white/80 bg-white/80 px-3.5 py-1.5 text-xs font-bold text-[#173f35] shadow-sm backdrop-blur-xl transition active:scale-95"
+              >
+                ← 返回
+              </button>
+            )}
+            <div>
+              <h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">收藏菜谱</h2>
+              <p className="mt-0.5 text-sm text-[#6f8178]">{recipes.length} 道已收藏菜谱 · 照着页面轻松做饭</p>
+            </div>
           </div>
         </div>
       ) : (
