@@ -14,3 +14,4 @@ references/
 *.db-shm
 *.db-wal
 *.log
+.worktrees/
