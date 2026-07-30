@@ -146,13 +146,22 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
   }
 
   async function recognizeImage(file: File) {
-    setBusy(true); setNotice(""); setAgentPhase("thinking");
+    setBusy(true);
+    setNotice("📷 正在使用 AI 识别照片中的食材，请稍候...");
+    setAgentPhase("thinking");
     try {
       const upload = new FormData(); upload.set("file", file);
       const response = await fetch("/api/media/image", { method: "POST", body: upload }); const data = await response.json() as { candidates?: FoodCandidate[]; error?: string };
       if (!response.ok || !data.candidates) throw new Error(data.error ?? "无法识别图片，请试着用文字告诉我");
       if (!data.candidates.length) throw new Error("图片中未发现清晰食物，请手动添加");
-      setPhotoCandidates(data.candidates); setAgentPhase("idle");
+
+      // Auto-add directly to inventory without secondary popup sheet
+      await queueAction({
+        type: "add_batches",
+        batches: data.candidates.map((item) => ({ ...item, purchasedAt: todayValue })),
+      });
+      setAgentPhase("idle");
+      setNotice(`✅ 已为您自动将【${data.candidates.map((c) => c.name).join("、")}】存入冰箱！`);
     } catch (error) { setAgentPhase("idle"); setNotice(error instanceof Error ? error.message : "照片识别失败"); } finally { setBusy(false); }
   }
 
@@ -188,7 +197,7 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
       {subPage === "favorites" && <FavoritesView onBack={() => setSubPage("none")} />}
       {subPage === "none" && <>
         {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
-        {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
+        {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => { if (window.confirm(`确定删除“${batch.name}”吗？`)) void queueAction({ type: "soft_delete_batch", batchId: batch.id }); }} />}
         {tab === "recipes" && <RecipesTab initialPreferences={initialPreferences} />}
         {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} onOpenHistory={() => setSubPage("history")} onOpenFavorites={() => setSubPage("favorites")} />}
       </>}

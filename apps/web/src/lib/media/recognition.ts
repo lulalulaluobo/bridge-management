@@ -18,6 +18,30 @@ const candidatesSchema = z.object({
 
 export type FoodCandidate = z.infer<typeof candidatesSchema>["candidates"][number];
 
+function normalizeCategory(cat: string): (typeof foodCategories)[number] {
+  if (!cat) return "其他";
+  const c = String(cat).trim();
+  if ((foodCategories as readonly string[]).includes(c)) return c as (typeof foodCategories)[number];
+  if (/肉|禽|排骨|鸡|鸭|猪|牛|羊|香肠|培根|火腿/.test(c)) return "肉类";
+  if (/菜|菇|笋|豆|番茄|黄瓜|茄|木耳|西兰花|土豆|胡萝卜/.test(c)) return "蔬菜";
+  if (/鱼|虾|蟹|贝|水产|海鲜|鱿鱼|三文鱼/.test(c)) return "海鲜";
+  if (/果|苹果|香蕉|桔|橙|莓|葡萄|桃|西瓜/.test(c)) return "水果";
+  if (/蛋|奶|乳|芝士|奶酪|酸奶|黄油/.test(c)) return "乳制品";
+  if (/米|面|饭|馒头|粉|饺|包子|汤圆|手抓饼|饼|面包/.test(c)) return "主食";
+  if (/饮|水|汁|可乐|茶|酒|奶茶|咖啡/.test(c)) return "饮料";
+  return "其他";
+}
+
+function normalizeLocation(loc: string): (typeof storageLocations)[number] {
+  if (!loc) return "冷藏室";
+  const l = String(loc).trim();
+  if ((storageLocations as readonly string[]).includes(l)) return l as (typeof storageLocations)[number];
+  if (/冻/.test(l)) return "冷冻室";
+  if (/藏|鲜/.test(l)) return "冷藏室";
+  if (/温|柜|桌|架/.test(l)) return "常温柜";
+  return "冷藏室";
+}
+
 export async function recognizeFoodImage(file: File, householdId = "default-household"): Promise<FoodCandidate[]> {
   if (!file.type.startsWith("image/")) throw new Error("请上传图片文件");
   if (file.size > 8 * 1024 * 1024) throw new Error("图片不能超过 8MB");
@@ -32,7 +56,7 @@ B) 购物小票/发票/收据/购物清单 → 从凭证文字中提取食物项
 处理规则：
 - 若为小票/发票/清单：优先取凭证上的实际数量和单位；必须跳过非食物项（纸巾、洗衣液、垃圾袋等日用品）
 - 若为实物食材：只返回看得见或高度确定的食物
-- 数量不确定时用 1，所有结果都是用户确认前的候选
+- 数量不确定时用 1
 - 必须只返回合法 JSON，不要 Markdown`;
   const systemPrompt = isQwen
     ? `${basePrompt}。格式：{"candidates":[{"name":"食物名","category":"蔬菜","quantity":1,"unit":"份","storageLocation":"冷藏室","opened":false}]}。category 只能是：${foodCategories.join("、")}；storageLocation 只能是：${storageLocations.join("、")}。`
@@ -49,8 +73,30 @@ B) 购物小票/发票/收据/购物清单 → 从凭证文字中提取食物项
   });
   if (!response.ok) throw new Error("图片识别暂时不可用，请改用手动录入");
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const candidateResult = candidatesSchema.safeParse(parseJson(data.choices?.[0]?.message?.content ?? ""));
-  return candidateResult.success ? candidateResult.data.candidates : [];
+  const rawText = data.choices?.[0]?.message?.content ?? "";
+  const parsed = parseJson(rawText);
+  const itemsArray = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.candidates)
+      ? parsed.candidates
+      : Array.isArray(parsed?.items)
+        ? parsed.items
+        : Array.isArray(parsed?.foods)
+          ? parsed.foods
+          : [];
+
+  const candidates: FoodCandidate[] = itemsArray
+    .map((item: any) => ({
+      name: String(item.name || "").trim(),
+      category: normalizeCategory(item.category),
+      quantity: typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1,
+      unit: String(item.unit || "份").trim() || "份",
+      storageLocation: normalizeLocation(item.storageLocation),
+      opened: Boolean(item.opened),
+    }))
+    .filter((item: FoodCandidate) => item.name.length > 0);
+
+  return candidates;
 }
 
 export async function transcribeAudio(file: File, householdId = "default-household") {
