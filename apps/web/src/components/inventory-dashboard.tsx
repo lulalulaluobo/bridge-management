@@ -225,7 +225,7 @@ function VoiceButton({ disabled, onAudio, onError, onPhaseChange, phase, hero = 
     if (disabled || recording || pressing) return;
     try {
       stopBrowserSpeech(); pressed.current = true; setPressing(true); onPhaseChange("listening");
-      target.setPointerCapture(pointerId);
+      try { target.setPointerCapture(pointerId); } catch {}
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!pressed.current) { stream.current.getTracks().forEach((track) => track.stop()); stream.current = null; setPressing(false); onPhaseChange("idle"); return; }
       const next = new MediaRecorder(stream.current);
@@ -237,19 +237,20 @@ function VoiceButton({ disabled, onAudio, onError, onPhaseChange, phase, hero = 
   }
   function armOrStart(event: React.PointerEvent<HTMLButtonElement>) {
     if (disabled || recording || pressing || armingInterrupt) return;
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
     if (phase !== "speaking") { void start(event.currentTarget, event.pointerId); return; }
-    pressStart.current = { x: event.clientX, y: event.clientY }; setArmingInterrupt(true); event.currentTarget.setPointerCapture(event.pointerId);
+    pressStart.current = { x: event.clientX, y: event.clientY }; setArmingInterrupt(true);
     const target = event.currentTarget; const pointerId = event.pointerId;
     interruptTimer.current = setTimeout(() => { clearInterruptArm(); void start(target, pointerId); }, 450);
   }
   function cancelArmOnMove(event: React.PointerEvent<HTMLButtonElement>) {
     if (!armingInterrupt || !pressStart.current) return;
-    if (Math.hypot(event.clientX - pressStart.current.x, event.clientY - pressStart.current.y) > 12) clearInterruptArm();
+    if (Math.hypot(event.clientX - pressStart.current.x, event.clientY - pressStart.current.y) > 24) clearInterruptArm();
   }
   function stop() { if (armingInterrupt) { clearInterruptArm(); return; } pressed.current = false; if (recorder.current?.state === "recording") recorder.current.stop(); else { setPressing(false); onPhaseChange("idle"); } }
   const listening = pressing || recording;
-  if (hero) return <button type="button" disabled={disabled} onPointerDown={armOrStart} onPointerMove={cancelArmOnMove} onPointerUp={stop} onPointerCancel={stop} className={`relative mt-4 grid h-20 w-20 place-items-center rounded-full border-4 border-white bg-[#173f35] text-white shadow-[0_14px_30px_rgba(23,63,53,.24)] outline-none transition-transform active:scale-95 disabled:opacity-60 ${listening ? "fridge-agent-listening bg-rose-500" : phase === "thinking" ? "fridge-agent-thinking" : phase === "speaking" ? "fridge-agent-speaking" : ""}`} aria-label={listening ? "正在聆听，松开后发送" : phase === "speaking" ? "按住半秒打断回复并开始说话" : disabled ? "正在整理语音" : "按住 Live 按钮说话"}><span className={`absolute inset-[-11px] rounded-full border-2 ${listening ? "border-rose-300 animate-ping" : "border-[#d2e5da]"}`} /><Icon name="mic" size="h-8 w-8" /></button>;
-  return <button type="button" disabled={disabled} onPointerDown={armOrStart} onPointerUp={stop} onPointerCancel={stop} className={`grid h-10 w-10 shrink-0 place-items-center rounded-[16px] transition-transform active:scale-95 ${listening ? "bg-rose-500 text-white" : "bg-[#dcece3] text-[#173f35]"}`} aria-label={listening ? "正在聆听，松开后发送" : "按住说话"} title={listening ? "松开后发送" : "按住说话"}><Icon name="mic" /></button>;
+  if (hero) return <button type="button" disabled={disabled} onPointerDown={armOrStart} onPointerMove={cancelArmOnMove} onPointerUp={stop} onPointerCancel={stop} className={`relative mt-4 grid h-20 w-20 touch-none select-none place-items-center rounded-full border-4 border-white bg-[#173f35] text-white shadow-[0_14px_30px_rgba(23,63,53,.24)] outline-none transition-transform active:scale-95 disabled:opacity-60 ${listening ? "fridge-agent-listening bg-rose-500" : phase === "thinking" ? "fridge-agent-thinking" : phase === "speaking" ? "fridge-agent-speaking" : ""}`} aria-label={listening ? "正在聆听，松开后发送" : phase === "speaking" ? "按住半秒打断回复并开始说话" : disabled ? "正在整理语音" : "按住 Live 按钮说话"}><span className={`absolute inset-[-11px] rounded-full border-2 ${listening ? "border-rose-300 animate-ping" : "border-[#d2e5da]"}`} /><Icon name="mic" size="h-8 w-8" /></button>;
+  return <button type="button" disabled={disabled} onPointerDown={armOrStart} onPointerUp={stop} onPointerCancel={stop} className={`grid h-10 w-10 shrink-0 touch-none select-none place-items-center rounded-[16px] transition-transform active:scale-95 ${listening ? "bg-rose-500 text-white" : "bg-[#dcece3] text-[#173f35]"}`} aria-label={listening ? "正在聆听，松开后发送" : "按住说话"} title={listening ? "松开后发送" : "按住说话"}><Icon name="mic" /></button>;
 }
 
 function FridgeSprite({ listening, phase }: { listening: boolean; phase: AgentPhase }) { return <div className="relative grid h-56 w-40 place-items-center overflow-visible"><span className={`fridge-agent-signal absolute h-44 w-44 rounded-full border-2 border-rose-300 ${listening ? "" : "hidden"}`} /><span className={`fridge-agent-signal absolute h-36 w-36 rounded-full border-2 border-rose-200 ${listening ? "[animation-delay:180ms]" : "hidden"}`} /><img src="/images/fridge-agent.png" alt="冰箱小精灵" className={`relative h-56 w-40 rounded-[28px] object-cover object-center shadow-[0_16px_32px_rgba(23,63,53,.18)] transition-transform duration-300 ${listening ? "scale-[1.03]" : ""}`} />{phase === "thinking" && <span className="fridge-agent-thought absolute right-0 top-14 h-3 w-3 rounded-full bg-amber-400" />}{phase === "speaking" && <span className="fridge-agent-voice absolute right-0 top-28 text-lg font-bold text-[#173f35]">)))</span>}</div>; }
