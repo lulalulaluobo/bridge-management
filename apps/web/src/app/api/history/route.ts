@@ -5,4 +5,4 @@ import { getInventoryStore } from "@/lib/inventory/store";
 
 export const runtime = "nodejs";
 
-export async function GET() { return NextResponse.json({ items: getInventoryStore(await currentHouseholdId()).listOperationHistory() }); }
+export async function GET() { return NextResponse.json({ history: getInventoryStore(await currentHouseholdId()).listOperationHistory() }); }

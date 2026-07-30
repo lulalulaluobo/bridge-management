@@ -13,13 +13,15 @@ export async function POST(request: Request, context: RouteContext<"/api/proposa
     const body = (await request.json()) as { idempotencyKey?: unknown; conversationId?: unknown };
     if (typeof body.idempotencyKey !== "string") throw new Error("缺少幂等键");
     const householdId = await currentHouseholdId();
-    const result = getInventoryStore(householdId).confirmProposal(proposalId, body.idempotencyKey, new Date(), "agent");
+    const store = getInventoryStore(householdId);
+    const result = store.confirmProposal(proposalId, body.idempotencyKey, new Date(), "agent");
+    const batches = store.listBatches();
     if (typeof body.conversationId === "string" && body.conversationId) {
       const conversations = getConversationStore(householdId);
       conversations.markPendingCommitted(body.conversationId, result.proposalId, result.action);
-      return NextResponse.json({ result, history: conversations.history(body.conversationId) });
+      return NextResponse.json({ result, batches, history: conversations.history(body.conversationId) });
     }
-    return NextResponse.json({ result });
+    return NextResponse.json({ result, batches });
   } catch (error) {
     return errorResponse(error, "无法确认操作");
   }

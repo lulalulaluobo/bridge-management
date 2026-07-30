@@ -6,6 +6,7 @@ import { getConversationStore } from "@/lib/agent/conversation";
 import { respondToUser } from "@/lib/agent/decision";
 import { errorResponse } from "@/lib/http";
 import { currentHouseholdId } from "@/lib/household";
+import { getInventoryStore } from "@/lib/inventory/store";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     const response = await respondToUser({ message: body.message, context, idempotencyKey: body.idempotencyKey }, householdId);
     conversations.append(conversationId, "assistant", response.message);
     if (response.committed) conversations.markPendingCommitted(conversationId, response.committed.proposalId, response.committed.action);
-    return NextResponse.json({ ...response, conversationId, history: conversations.history(conversationId) });
+    return NextResponse.json({ ...response, conversationId, history: conversations.history(conversationId), batches: response.committed ? getInventoryStore(householdId).listBatches() : undefined });
   } catch (error) {
     return errorResponse(error, "Agent 暂时无法回复");
   }
