@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { FoodPreferences } from "@/lib/preferences";
-import type { MealRecommendations } from "@/lib/recipes";
+import type { MealDish, MealRecommendations } from "@/lib/recipes";
 
 export function MealRecommendations({ initialPreferences }: { initialPreferences: FoodPreferences }) {
   const [preferences, setPreferences] = useState(initialPreferences);
@@ -11,38 +11,475 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const [mealTime, setMealTime] = useState<string>("晚餐");
+  const [diners, setDiners] = useState<string>("2人");
+  const [extraConditions, setExtraConditions] = useState<string>("");
+
+  const [favoritesMap, setFavoritesMap] = useState<Record<string, boolean>>({});
+  const [selectedRecipe, setSelectedRecipe] = useState<MealDish | null>(null);
+
+  useEffect(() => {
+    void loadFavorites();
+  }, []);
+
+  async function loadFavorites() {
+    try {
+      const res = await fetch("/api/favorites");
+      const data = (await res.json()) as { favorites?: Array<{ name: string; recipeId: string }> };
+      if (data.favorites) {
+        const map: Record<string, boolean> = {};
+        for (const item of data.favorites) {
+          if (item.recipeId) map[item.recipeId] = true;
+          if (item.name) map[item.name] = true;
+        }
+        setFavoritesMap(map);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
   async function recommend() {
-    setBusy(true); setNotice("");
+    setBusy(true);
+    setNotice("");
     try {
       const saved = await savePreferences(preferences);
       setPreferences(saved);
-      const response = await fetch("/api/recommendations", { method: "POST" });
+      const response = await fetch("/api/recommendations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mealTime, diners, extraConditions }),
+      });
       const data = (await response.json()) as { recommendations?: MealRecommendations; error?: string };
       if (!response.ok || !data.recommendations) throw new Error(data.error ?? "暂时无法推荐菜式");
       setResults(data.recommendations);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "暂时无法推荐菜式"); } finally { setBusy(false); }
+      await loadFavorites();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "暂时无法推荐菜式");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  return <section className="rounded-3xl bg-white p-4 shadow-sm"><h2 className="text-lg font-semibold">今天吃什么？</h2><p className="mt-1 text-sm text-slate-600">优先临期和已开封食材；过敏与禁忌始终优先。</p><details className="mt-3 rounded-2xl bg-slate-50 p-3"><summary className="cursor-pointer text-sm font-semibold">饮食与做菜条件</summary><PreferenceFields value={preferences} onChange={setPreferences} /><button type="button" onClick={async () => { try { setPreferences(await savePreferences(preferences)); setNotice("已保存做菜条件"); } catch (error) { setNotice(error instanceof Error ? error.message : "无法保存偏好"); } }} className="mt-3 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-[#173f35] shadow-sm">保存条件</button></details><button type="button" disabled={busy} onClick={recommend} className="mt-3 w-full rounded-xl bg-[#173f35] px-4 py-3 font-semibold text-white disabled:opacity-50">{busy ? "正在搭配…" : "推荐至少三道菜"}</button>{notice && <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-sm" role="status">{notice}</p>}{results && <MealRecommendationCards recommendations={results} />}</section>;
+  async function toggleFavorite(dish: MealDish) {
+    const key = dish.recipeId || dish.name;
+    const isSaved = Boolean(favoritesMap[key]);
+
+    try {
+      if (isSaved) {
+        await fetch(`/api/favorites?id=${encodeURIComponent(key)}`, { method: "DELETE" });
+        setFavoritesMap((prev) => ({ ...prev, [key]: false, [dish.name]: false }));
+      } else {
+        await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipeId: dish.recipeId || "",
+            name: dish.name,
+            cover: dish.cover || "",
+            score: dish.score || "",
+            cooked: dish.cooked || "",
+            reason: dish.reason || "",
+            ingredients: dish.availableIngredients?.map((item) => ({ name: item.name, unit: item.unit, inStock: true })) || [],
+            steps: dish.steps || [],
+            tips: dish.tips || "",
+          }),
+        });
+        setFavoritesMap((prev) => ({ ...prev, [key]: true, [dish.name]: true }));
+      }
+    } catch {
+      setNotice("操作失败，请重试");
+    }
+  }
+
+  return (
+    <section className="rounded-3xl bg-white p-4 shadow-sm">
+      <h2 className="text-lg font-bold text-[#173f35]">今天吃什么？</h2>
+      <p className="mt-1 text-xs leading-5 text-slate-500">优先临期和已开封食材；下厨房精选菜谱，指导你看着页面做饭。</p>
+
+      {/* 就战与餐次选项 */}
+      <div className="mt-3 rounded-2xl bg-[#f5f7f4] p-3 text-sm">
+        <label className="block text-xs font-semibold text-[#506359]">用餐时间段</label>
+        <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+          {["早餐", "午餐", "晚餐", "夜宵"].map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setMealTime(item)}
+              className={`rounded-xl py-1.5 text-xs font-medium transition ${
+                mealTime === item ? "bg-[#173f35] text-white shadow-sm" : "bg-white text-[#405148]"
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+
+        <label className="mt-3 block text-xs font-semibold text-[#506359]">就餐人数</label>
+        <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+          {["1人", "2人", "3-4人", "5人以上"].map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setDiners(item)}
+              className={`rounded-xl py-1.5 text-xs font-medium transition ${
+                diners === item ? "bg-[#173f35] text-white shadow-sm" : "bg-white text-[#405148]"
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+
+        <label className="mt-3 block text-xs font-semibold text-[#506359]">额外条件 / 特别想吃</label>
+        <input
+          value={extraConditions}
+          onChange={(event) => setExtraConditions(event.target.value)}
+          placeholder="例如：想吃辣、清淡少油、快速搞定"
+          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-[#25332d] outline-none focus:border-[#173f35]"
+        />
+      </div>
+
+      <details className="mt-3 rounded-2xl bg-slate-50 p-3">
+        <summary className="cursor-pointer text-xs font-semibold text-slate-700">▼ 饮食与做菜条件设置</summary>
+        <PreferenceFields value={preferences} onChange={setPreferences} />
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              setPreferences(await savePreferences(preferences));
+              setNotice("已保存做菜条件");
+            } catch (error) {
+              setNotice(error instanceof Error ? error.message : "无法保存偏好");
+            }
+          }}
+          className="mt-3 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#173f35] shadow-sm border border-slate-200"
+        >
+          保存条件
+        </button>
+      </details>
+
+      <button
+        type="button"
+        disabled={busy}
+        onClick={recommend}
+        className="mt-4 w-full rounded-2xl bg-[#173f35] px-4 py-3.5 text-sm font-bold text-white shadow-md active:scale-95 disabled:opacity-50"
+      >
+        {busy ? "正在分析库存与下厨房菜谱…" : "推荐菜谱方案"}
+      </button>
+
+      {notice && (
+        <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700" role="status">
+          {notice}
+        </p>
+      )}
+
+      {results && (
+        <MealRecommendationCards
+          recommendations={results}
+          favoritesMap={favoritesMap}
+          onToggleFavorite={toggleFavorite}
+          onSelectRecipe={setSelectedRecipe}
+        />
+      )}
+
+      {selectedRecipe && <CookingModal recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} />}
+    </section>
+  );
 }
 
-export function MealRecommendationCards({ recommendations }: { recommendations: MealRecommendations }) {
-  return <div className="mt-3 grid gap-2">{recommendations.dishes.map((dish) => <article key={dish.name} className="rounded-2xl bg-emerald-50 p-3"><p className="font-semibold">{dish.name}</p><ReadinessLine label="库存已有" values={dish.availableIngredients?.map((item) => `${item.name}${item.quantity}${item.unit}${item.source === "照片候选" ? "（照片）" : ""}`) ?? dish.uses.map((item) => `${item.quantity}${item.unit}`)} tone="text-emerald-800" /><ReadinessLine label="可替代" values={dish.substitutions.flatMap((item) => item.alternatives.map((alternative) => `${item.ingredient} → ${alternative}`))} tone="text-sky-800" empty="无" /><ReadinessLine label="确实缺少" values={dish.missingIngredients} tone="text-amber-900" empty="无" /><p className="mt-2 text-sm leading-5 text-slate-600">{dish.reason}</p></article>)}</div>;
+export function MealRecommendationCards({
+  recommendations,
+  favoritesMap = {},
+  onToggleFavorite,
+  onSelectRecipe,
+}: {
+  recommendations: MealRecommendations;
+  favoritesMap?: Record<string, boolean>;
+  onToggleFavorite?: (dish: MealDish) => void;
+  onSelectRecipe?: (dish: MealDish) => void;
+}) {
+  return (
+    <div className="mt-4 grid gap-3">
+      {recommendations.dishes.map((dish) => {
+        const key = dish.recipeId || dish.name;
+        const isSaved = Boolean(favoritesMap[key] || favoritesMap[dish.name]);
+
+        return (
+          <article key={dish.name} className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+            {dish.cover && (
+              <div className="relative h-40 w-full overflow-hidden bg-slate-100">
+                {/* eslint-disable-next-html-element-suppression */}
+                <img src={dish.cover} alt={dish.name} className="h-full w-full object-cover" />
+                {dish.score && (
+                  <span className="absolute left-2.5 top-2.5 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-amber-300 backdrop-blur-md">
+                    ⭐ {dish.score} 分
+                  </span>
+                )}
+                {dish.cooked && (
+                  <span className="absolute right-2.5 top-2.5 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-md">
+                    {dish.cooked}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-base font-bold text-[#173f35]">{dish.name}</h3>
+                {onToggleFavorite && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleFavorite(dish)}
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                      isSaved ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    <span>{isSaved ? "★" : "☆"}</span>
+                    <span>{isSaved ? "已收藏" : "收藏"}</span>
+                  </button>
+                )}
+              </div>
+
+              <ReadinessLine
+                label="库存已有"
+                values={dish.availableIngredients?.map((item) => `${item.name}${item.quantity}${item.unit}`) ?? []}
+                tone="text-emerald-800"
+              />
+              <ReadinessLine
+                label="可替代"
+                values={dish.substitutions.flatMap((item) => item.alternatives.map((alternative) => `${item.ingredient} → ${alternative}`))}
+                tone="text-sky-800"
+                empty="无"
+              />
+              <ReadinessLine label="确实缺少" values={dish.missingIngredients} tone="text-amber-900" empty="无" />
+
+              <p className="mt-2 text-xs leading-5 text-slate-600">{dish.reason}</p>
+
+              {dish.steps && dish.steps.length > 0 && onSelectRecipe && (
+                <button
+                  type="button"
+                  onClick={() => onSelectRecipe(dish)}
+                  className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#173f35]/10 py-2.5 text-xs font-bold text-[#173f35] transition hover:bg-[#173f35]/20 active:scale-98"
+                >
+                  📖 查看烹饪步骤与图片 ({dish.steps.length} 步)
+                </button>
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
-function ReadinessLine({ label, values, tone, empty = "—" }: { label: string; values: string[]; tone: string; empty?: string }) { return <p className={`mt-1 text-sm ${tone}`}><span className="font-semibold">{label}：</span>{values.join("、") || empty}</p>; }
+function ReadinessLine({ label, values, tone, empty = "—" }: { label: string; values: string[]; tone: string; empty?: string }) {
+  return (
+    <p className={`mt-1 text-xs ${tone}`}>
+      <span className="font-semibold">{label}：</span>
+      {values.join("、") || empty}
+    </p>
+  );
+}
 
 function PreferenceFields({ value, onChange }: { value: FoodPreferences; onChange: (value: FoodPreferences) => void }) {
-  return <div className="mt-3 grid gap-2 text-sm"><TextField label="过敏食材" value={value.allergies.join("、")} placeholder="例如：花生、虾" onChange={(allergies) => onChange({ ...value, allergies: split(allergies) })} /><TextField label="不吃的食材" value={value.avoidIngredients.join("、")} placeholder="例如：香菜" onChange={(avoidIngredients) => onChange({ ...value, avoidIngredients: split(avoidIngredients) })} /><TextField label="可用厨具" value={value.appliances.join("、")} placeholder="例如：空气炸锅、电饭煲" onChange={(appliances) => onChange({ ...value, appliances: split(appliances) })} /><TextField label="常备调料" value={value.staples.join("、")} placeholder="例如：盐、油、生抽" onChange={(staples) => onChange({ ...value, staples: split(staples) })} /><label className="grid gap-1">其他偏好<textarea value={value.dietaryNotes} onChange={(event) => onChange({ ...value, dietaryNotes: event.target.value })} className="min-h-16 rounded-xl border border-slate-300 bg-white px-3 py-2" placeholder="例如：少油、晚餐" /></label><div className="grid grid-cols-2 gap-2"><label className="grid gap-1">最大用时<input type="number" min="5" max="360" value={value.maxCookingMinutes} onChange={(event) => onChange({ ...value, maxCookingMinutes: Number(event.target.value) || 30 })} className="rounded-xl border border-slate-300 bg-white px-3 py-2" /></label><label className="grid gap-1">烹饪水平<select value={value.cookingSkill} onChange={(event) => onChange({ ...value, cookingSkill: event.target.value as FoodPreferences["cookingSkill"] })} className="rounded-xl border border-slate-300 bg-white px-3 py-2"><option>随意</option><option>新手</option><option>熟练</option></select></label></div></div>;
+  return (
+    <div className="mt-3 grid gap-2 text-xs">
+      <TextField
+        label="过敏食材"
+        value={value.allergies.join("、")}
+        placeholder="例如：花生、虾"
+        onChange={(allergies) => onChange({ ...value, allergies: split(allergies) })}
+      />
+      <TextField
+        label="不吃的食材"
+        value={value.avoidIngredients.join("、")}
+        placeholder="例如：香菜"
+        onChange={(avoidIngredients) => onChange({ ...value, avoidIngredients: split(avoidIngredients) })}
+      />
+      <TextField
+        label="可用厨具"
+        value={value.appliances.join("、")}
+        placeholder="例如：空气炸锅、电饭煲"
+        onChange={(appliances) => onChange({ ...value, appliances: split(appliances) })}
+      />
+      <TextField
+        label="常备调料"
+        value={value.staples.join("、")}
+        placeholder="例如：盐、油、生抽"
+        onChange={(staples) => onChange({ ...value, staples: split(staples) })}
+      />
+      <label className="grid gap-1 font-medium text-slate-700">
+        其他偏好
+        <textarea
+          value={value.dietaryNotes}
+          onChange={(event) => onChange({ ...value, dietaryNotes: event.target.value })}
+          className="min-h-14 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none"
+          placeholder="例如：少油、晚餐"
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="grid gap-1 font-medium text-slate-700">
+          最大用时 (分钟)
+          <input
+            type="number"
+            min="5"
+            max="360"
+            value={value.maxCookingMinutes}
+            onChange={(event) => onChange({ ...value, maxCookingMinutes: Number(event.target.value) || 30 })}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none"
+          />
+        </label>
+        <label className="grid gap-1 font-medium text-slate-700">
+          烹饪水平
+          <select
+            value={value.cookingSkill}
+            onChange={(event) => onChange({ ...value, cookingSkill: event.target.value as FoodPreferences["cookingSkill"] })}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none"
+          >
+            <option>随意</option>
+            <option>新手</option>
+            <option>熟练</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  );
 }
 
-function TextField({ label, value, placeholder, onChange }: { label: string; value: string; placeholder: string; onChange: (value: string) => void }) { return <label className="grid gap-1">{label}<input value={value} onChange={(event) => onChange(event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2" placeholder={placeholder} /></label>; }
+function TextField({ label, value, placeholder, onChange }: { label: string; value: string; placeholder: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 font-medium text-slate-700">
+      {label}
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none"
+        placeholder={placeholder}
+      />
+    </label>
+  );
+}
 
 async function savePreferences(preferences: FoodPreferences) {
-  const response = await fetch("/api/preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(preferences) });
+  const response = await fetch("/api/preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preferences),
+  });
   const data = (await response.json()) as { preferences?: FoodPreferences; error?: string };
   if (!response.ok || !data.preferences) throw new Error(data.error ?? "无法保存偏好");
   return data.preferences;
 }
 
-function split(value: string) { return value.split(/[，,、\n]/).map((item) => item.trim()).filter(Boolean); }
+function split(value: string) {
+  return value
+    .split(/[，,、\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function CookingModal({
+  recipe,
+  onClose,
+}: {
+  recipe: {
+    name: string;
+    cover?: string;
+    score?: string;
+    cooked?: string;
+    ingredients?: Array<{ name: string; unit: string; inStock?: boolean }>;
+    steps?: Array<{ step: number; desc: string; img?: string }>;
+    tips?: string;
+  };
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="relative flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] bg-white shadow-2xl sm:rounded-[28px]">
+        {/* Header photo & title */}
+        <div className="relative h-48 w-full shrink-0 bg-slate-800">
+          {recipe.cover ? (
+            <img src={recipe.cover} alt={recipe.name} className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-[#173f35] text-2xl font-bold text-white">
+              {recipe.name}
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-black/50 text-white backdrop-blur-md"
+          >
+            ✕
+          </button>
+
+          <div className="absolute bottom-3 left-4 right-4">
+            <h2 className="text-xl font-bold text-white">{recipe.name}</h2>
+            <div className="mt-1 flex items-center gap-2 text-xs font-medium text-amber-300">
+              {recipe.score && <span>⭐ 下厨房 {recipe.score} 分</span>}
+              {recipe.cooked && <span>· {recipe.cooked}</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* Content scroll */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {/* Ingredients list */}
+          {recipe.ingredients && recipe.ingredients.length > 0 && (
+            <section className="mb-6">
+              <h3 className="text-sm font-bold text-[#173f35]">🥗 用料清单</h3>
+              <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs">
+                {recipe.ingredients.map((ing, idx) => (
+                  <div key={idx} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                    <span className="font-medium text-slate-800">{ing.name}</span>
+                    <span className="text-slate-500">{ing.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Cooking steps */}
+          {recipe.steps && recipe.steps.length > 0 ? (
+            <section className="mb-6">
+              <h3 className="text-sm font-bold text-[#173f35]">🍳 烹饪步骤</h3>
+              <div className="mt-3 grid gap-4">
+                {recipe.steps.map((step) => (
+                  <div key={step.step} className="rounded-2xl border border-slate-100 bg-[#fbfcfb] p-3.5 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="grid h-6 w-6 place-items-center rounded-full bg-[#173f35] text-xs font-bold text-white">
+                        {step.step}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-600">步骤 {step.step}</span>
+                    </div>
+
+                    <p className="mt-2 text-sm leading-6 text-slate-800 whitespace-pre-line">{step.desc}</p>
+
+                    {step.img && (
+                      <div className="mt-3 overflow-hidden rounded-xl bg-slate-100">
+                        <img src={step.img} alt={`步骤 ${step.step}`} className="max-h-64 w-full object-cover" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <p className="text-center text-xs text-slate-500">暂无步骤图解。</p>
+          )}
+
+          {/* Tips */}
+          {recipe.tips && (
+            <section className="rounded-2xl bg-amber-50/80 p-3.5 text-xs text-amber-900">
+              <h4 className="font-bold">💡 烹饪小贴士</h4>
+              <p className="mt-1 leading-5 whitespace-pre-line">{recipe.tips}</p>
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

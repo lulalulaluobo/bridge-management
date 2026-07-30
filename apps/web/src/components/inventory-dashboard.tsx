@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { FavoritesView } from "@/components/favorites-view";
 import { LlmSettings } from "@/components/llm-settings";
 import { AgentWriteSettings } from "@/components/agent-write-settings";
 import { AccountSettings } from "@/components/account-settings";
@@ -15,7 +16,7 @@ import type { FoodPreferences } from "@/lib/preferences";
 import type { MealRecommendations as MealRecommendationsData } from "@/lib/recipes";
 
 type AddForm = { name: string; category: (typeof foodCategories)[number]; quantity: string; unit: string; purchasedAt: string; storageLocation: (typeof storageLocations)[number]; opened: boolean };
-type Tab = "today" | "inventory" | "history" | "more";
+type Tab = "today" | "inventory" | "favorites" | "history" | "more";
 type HistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; detail: string; createdAt: string };
 type BatchChanges = Extract<ProposalAction, { type: "update_batch" }>["changes"];
 type AgentPhase = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
@@ -135,6 +136,7 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     <div className={`mx-auto w-full max-w-xl px-4 sm:px-5 pt-[max(1.2rem,env(safe-area-inset-top))] ${tab === "today" ? "h-full" : ""}`}>
       {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
       {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
+      {tab === "favorites" && <FavoritesView />}
       {tab === "history" && <HistoryView items={history} />}
       {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} />}
     </div>
@@ -144,7 +146,7 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     {agentProposal && <AgentConfirmSheet proposal={agentProposal} busy={busy} onCancel={() => setAgentProposal(null)} onConfirm={() => void confirmAgentProposal()} />}
     {photoCandidates && <PhotoCandidatesSheet candidates={photoCandidates} busy={busy} onClose={() => setPhotoCandidates(null)} onRecommend={(candidates) => void recommendFromPhoto(candidates)} onContinue={(candidates) => { setPhotoCandidates(null); void queueAction({ type: "add_batches", batches: candidates.map((item) => ({ ...item, purchasedAt: todayValue })) }); }} />}
     {photoRecommendations && <Sheet title="这些食材可以做什么？" onClose={() => setPhotoRecommendations(null)}><p className="-mt-2 text-sm leading-5 text-[#64736c]">照片食材尚未写入库存；以下建议仅供决定是否入库或做菜。</p><MealRecommendationCards recommendations={photoRecommendations} /></Sheet>}
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-[#f7f8f5]/90 px-5 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl"><div className="mx-auto grid max-w-xl grid-cols-4"><TabButton active={tab === "today"} label="今天" icon="home" onClick={() => setTab("today")} /><TabButton active={tab === "inventory"} label="库存" icon="grid" onClick={() => setTab("inventory")} /><TabButton active={tab === "history"} label="记录" icon="history" onClick={() => setTab("history")} /><TabButton active={tab === "more"} label="更多" icon="sliders" onClick={() => setTab("more")} /></div></nav>
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-[#f7f8f5]/90 px-3 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl"><div className="mx-auto grid max-w-xl grid-cols-5"><TabButton active={tab === "today"} label="今天" icon="home" onClick={() => setTab("today")} /><TabButton active={tab === "inventory"} label="库存" icon="grid" onClick={() => setTab("inventory")} /><TabButton active={tab === "favorites"} label="收藏" icon="star" onClick={() => setTab("favorites")} /><TabButton active={tab === "history"} label="记录" icon="history" onClick={() => setTab("history")} /><TabButton active={tab === "more"} label="更多" icon="sliders" onClick={() => setTab("more")} /></div></nav>
   </main>;
 }
 
@@ -268,10 +270,10 @@ function speakReply(text: string, onComplete: () => void) {
   window.speechSynthesis.speak(utterance);
 }
 
-type IconName = "arrow" | "box" | "camera" | "close" | "consume" | "grid" | "history" | "home" | "mic" | "mute" | "pencil" | "plus" | "sliders" | "speaker" | "trash";
+type IconName = "arrow" | "box" | "camera" | "close" | "consume" | "grid" | "history" | "home" | "mic" | "mute" | "pencil" | "plus" | "sliders" | "speaker" | "star" | "trash";
 function Icon({ name, size = "h-5 w-5" }: { name: IconName; size?: string }) {
   const paths: Record<IconName, React.ReactNode> = {
-    arrow: <path d="M5 12h14M13 6l6 6-6 6" />, box: <><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></>, camera: <><path d="M4 7h3l1.5-2h7L17 7h3v12H4z" /><circle cx="12" cy="13" r="3.2" /></>, close: <path d="m7 7 10 10M17 7 7 17" />, consume: <><path d="M5 9h14l-1 10H6z" /><path d="M8 9a4 4 0 0 1 8 0M12 13v3" /></>, grid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>, history: <><path d="M4 12a8 8 0 1 0 2.3-5.7" /><path d="M4 4v5h5M12 7v5l3 2" /></>, home: <><path d="m3 11 9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" /></>, mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" /></>, mute: <><path d="M5 10v4h4l5 4V6l-5 4z" /><path d="m18 9-5 6" /></>, pencil: <><path d="m4 20 4.2-1 10.3-10.3a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20z" /><path d="m13.8 7.8 2.8 2.8" /></>, plus: <path d="M12 5v14M5 12h14" />, sliders: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="2" /><circle cx="15" cy="17" r="2" /></>, speaker: <><path d="M5 10v4h4l5 4V6l-5 4z" /><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a7.5 7.5 0 0 1 0 11" /></>, trash: <><path d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3" /></>,
+    arrow: <path d="M5 12h14M13 6l6 6-6 6" />, box: <><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></>, camera: <><path d="M4 7h3l1.5-2h7L17 7h3v12H4z" /><circle cx="12" cy="13" r="3.2" /></>, close: <path d="m7 7 10 10M17 7 7 17" />, consume: <><path d="M5 9h14l-1 10H6z" /><path d="M8 9a4 4 0 0 1 8 0M12 13v3" /></>, grid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>, history: <><path d="M4 12a8 8 0 1 0 2.3-5.7" /><path d="M4 4v5h5M12 7v5l3 2" /></>, home: <><path d="m3 11 9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" /></>, mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" /></>, mute: <><path d="M5 10v4h4l5 4V6l-5 4z" /><path d="m18 9-5 6" /></>, pencil: <><path d="m4 20 4.2-1 10.3-10.3a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20z" /><path d="m13.8 7.8 2.8 2.8" /></>, plus: <path d="M12 5v14M5 12h14" />, sliders: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="2" /><circle cx="15" cy="17" r="2" /></>, speaker: <><path d="M5 10v4h4l5 4V6l-5 4z" /><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a7.5 7.5 0 0 1 0 11" /></>, star: <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />, trash: <><path d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" className={`${size} fill-none stroke-current stroke-[1.8]`} strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
