@@ -229,11 +229,15 @@ function toBatch(row: BatchRow): FoodBatch {
   };
 }
 
-function createDefaultStore(): InventoryStore {
+export function openAppDatabase(): Database.Database {
   const configuredPath = process.env.FRIDGE_DATABASE_PATH;
   const dbPath = configuredPath ?? join(process.cwd(), "data", "fridge.db");
   mkdirSync(dirname(dbPath), { recursive: true });
-  return new InventoryStore(new Database(dbPath));
+  return new Database(dbPath);
+}
+
+function createDefaultStore(): InventoryStore {
+  return new InventoryStore(openAppDatabase());
 }
 
 const globalForStore = globalThis as unknown as { inventoryStore?: InventoryStore };
