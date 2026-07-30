@@ -1,0 +1,15 @@
+services:
+  fridge-agent:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.production
+    environment:
+      FRIDGE_DATABASE_PATH: /data/fridge.db
+    volumes:
+      - fridge-data:/data
+
+volumes:
+  fridge-data:
