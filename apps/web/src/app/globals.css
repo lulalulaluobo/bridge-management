@@ -5,9 +5,23 @@
   --foreground: #17231f;
 }
 
+html,
+body {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  overflow-x: hidden;
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
 }

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { __test__ } from "@/lib/llm/crypto-test";
+import { decryptSecret, encryptSecret } from "@/lib/llm/crypto";
 
 describe("BYOK encryption", () => {
   it("uses authenticated encryption and rejects a changed ciphertext", () => {
-    const encrypted = __test__.encrypt("sk-example-secret", "household:openai", Buffer.alloc(32, 7));
-    expect(__test__.decrypt(encrypted, "household:openai", Buffer.alloc(32, 7))).toBe("sk-example-secret");
-    expect(() => __test__.decrypt({ ...encrypted, ciphertext: `${encrypted.ciphertext}x` }, "household:openai", Buffer.alloc(32, 7))).toThrow();
+    const encrypted = encryptSecret("sk-example-secret", "household:openai", Buffer.alloc(32, 7));
+    expect(decryptSecret(encrypted, "household:openai", Buffer.alloc(32, 7))).toBe("sk-example-secret");
+    const alteredCiphertext = `${encrypted.ciphertext[0] === "A" ? "B" : "A"}${encrypted.ciphertext.slice(1)}`;
+    expect(() => decryptSecret({ ...encrypted, ciphertext: alteredCiphertext }, "household:openai", Buffer.alloc(32, 7))).toThrow();
   });
 });

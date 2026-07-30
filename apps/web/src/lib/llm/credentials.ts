@@ -1,11 +1,12 @@
 import "server-only";
 
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import OpenAI from "openai";
 import { z } from "zod";
 
 import { openAppDatabase } from "@/lib/inventory/store";
+import { decryptSecret, encryptSecret } from "@/lib/llm/crypto";
 
 const DEFAULT_HOUSEHOLD_ID = "default-household";
 const providerSchema = z.literal("openai");
@@ -41,8 +42,6 @@ type CredentialRow = {
   key_mask: string;
   updated_at: string;
 };
-
-type EncryptedSecret = { ciphertext: string; iv: string; authTag: string };
 
 export class CredentialStore {
   private readonly db = openAppDatabase();
@@ -84,7 +83,7 @@ export class CredentialStore {
   async verifyAndSave(input: unknown): Promise<CredentialSummary> {
     const value = credentialInputSchema.parse(input);
     await verifyOpenAiKey(value.apiKey);
-    const encrypted = encryptSecret(value.apiKey, `${DEFAULT_HOUSEHOLD_ID}:${value.provider}`);
+    const encrypted = encryptSecret(value.apiKey, `${DEFAULT_HOUSEHOLD_ID}:${value.provider}`, getEncryptionKey());
     const now = new Date().toISOString();
     const existing = this.db.prepare("SELECT id FROM llm_credentials WHERE household_id = ? AND provider = ?").get(DEFAULT_HOUSEHOLD_ID, value.provider) as { id: string } | undefined;
     const id = existing?.id ?? randomUUID();
@@ -115,7 +114,7 @@ export class CredentialStore {
   getDecryptedOpenAiCredential(): (CredentialSummary & { apiKey: string }) | null {
     const row = this.db.prepare("SELECT * FROM llm_credentials WHERE household_id = ? AND provider = 'openai'").get(DEFAULT_HOUSEHOLD_ID) as CredentialRow | undefined;
     if (!row) return null;
-    return { ...toSummary(row), apiKey: decryptSecret({ ciphertext: row.ciphertext, iv: row.iv, authTag: row.auth_tag }, `${DEFAULT_HOUSEHOLD_ID}:${row.provider}`) };
+    return { ...toSummary(row), apiKey: decryptSecret({ ciphertext: row.ciphertext, iv: row.iv, authTag: row.auth_tag }, `${DEFAULT_HOUSEHOLD_ID}:${row.provider}`, getEncryptionKey()) };
   }
 
   private writeAudit(provider: "openai", event: string, createdAt: string) {
@@ -131,22 +130,6 @@ export async function verifyOpenAiKey(apiKey: string) {
   } catch {
     throw new Error("无法验证此 OpenAI Key，请检查权限和网络后重试");
   }
-}
-
-function encryptSecret(secret: string, aad: string): EncryptedSecret {
-  const key = getEncryptionKey();
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  cipher.setAAD(Buffer.from(aad));
-  const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
-  return { ciphertext: ciphertext.toString("base64"), iv: iv.toString("base64"), authTag: cipher.getAuthTag().toString("base64") };
-}
-
-function decryptSecret(encrypted: EncryptedSecret, aad: string): string {
-  const decipher = createDecipheriv("aes-256-gcm", getEncryptionKey(), Buffer.from(encrypted.iv, "base64"));
-  decipher.setAAD(Buffer.from(aad));
-  decipher.setAuthTag(Buffer.from(encrypted.authTag, "base64"));
-  return Buffer.concat([decipher.update(Buffer.from(encrypted.ciphertext, "base64")), decipher.final()]).toString("utf8");
 }
 
 function getEncryptionKey(): Buffer {
