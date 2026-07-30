@@ -86,7 +86,7 @@ export function FavoritesView() {
               {recipe.cover ? (
                 <div className="h-28 w-28 shrink-0 bg-slate-100">
                   {/* eslint-disable-next-html-element-suppression */}
-                  <img src={recipe.cover} alt={recipe.name} className="h-full w-full object-cover" />
+                  <img src={recipe.cover} alt={recipe.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                 </div>
               ) : (
                 <div className="flex h-28 w-28 shrink-0 items-center justify-center bg-[#173f35] font-bold text-white">

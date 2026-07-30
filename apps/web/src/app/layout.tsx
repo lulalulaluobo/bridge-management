@@ -7,6 +7,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "冰箱 Agent",
   description: "用对话管理家庭冰箱库存。",
+  referrer: "no-referrer",
   applicationName: "冰箱 Agent",
   icons: { icon: "/icons/icon-512.png", apple: "/icons/icon-192.png" },
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "冰箱 Agent" },

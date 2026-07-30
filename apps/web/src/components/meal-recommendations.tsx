@@ -210,7 +210,7 @@ export function MealRecommendationCards({
             {dish.cover && (
               <div className="relative h-40 w-full overflow-hidden bg-slate-100">
                 {/* eslint-disable-next-html-element-suppression */}
-                <img src={dish.cover} alt={dish.name} className="h-full w-full object-cover" />
+                <img src={dish.cover} alt={dish.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                 {dish.score && (
                   <span className="absolute left-2.5 top-2.5 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-amber-300 backdrop-blur-md">
                     ⭐ {dish.score} 分
@@ -400,7 +400,7 @@ export function CookingModal({
         {/* Header photo & title */}
         <div className="relative h-48 w-full shrink-0 bg-slate-800">
           {recipe.cover ? (
-            <img src={recipe.cover} alt={recipe.name} className="h-full w-full object-cover" />
+            <img src={recipe.cover} alt={recipe.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-[#173f35] text-2xl font-bold text-white">
               {recipe.name}
@@ -460,7 +460,7 @@ export function CookingModal({
 
                     {step.img && (
                       <div className="mt-3 overflow-hidden rounded-xl bg-slate-100">
-                        <img src={step.img} alt={`步骤 ${step.step}`} className="max-h-64 w-full object-cover" />
+                        <img src={step.img} alt={`步骤 ${step.step}`} referrerPolicy="no-referrer" className="max-h-64 w-full object-cover" />
                       </div>
                     )}
                   </div>

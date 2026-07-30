@@ -32,12 +32,25 @@ export type XiachufangRecipeDetail = {
   tips: string;
 };
 
-const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+  "Cache-Control": "max-age=0",
+  "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+  "Sec-Ch-Ua-Mobile": "?0",
+  "Sec-Ch-Ua-Platform": '"macOS"',
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+  "Upgrade-Insecure-Requests": "1",
+};
 
 export async function searchXiachufang(keyword: string, limit = 6): Promise<XiachufangSearchResult[]> {
   try {
     const url = `https://www.xiachufang.com/search/?keyword=${encodeURIComponent(keyword)}`;
-    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT }, next: { revalidate: 3600 } });
+    const response = await fetch(url, { headers: BROWSER_HEADERS, next: { revalidate: 3600 } });
     if (!response.ok) return [];
     const html = await response.text();
 
@@ -75,7 +88,7 @@ export async function getXiachufangRecipeDetail(recipeId: string): Promise<Xiach
     const id = recipeId.replace(/[^0-9]/g, "");
     if (!id) return null;
     const url = `https://www.xiachufang.com/recipe/${id}/`;
-    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT }, next: { revalidate: 86400 } });
+    const response = await fetch(url, { headers: BROWSER_HEADERS, next: { revalidate: 86400 } });
     if (!response.ok) return null;
     const html = await response.text();
 

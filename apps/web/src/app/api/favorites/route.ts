@@ -5,6 +5,8 @@ import { getFavoritesStore } from "@/lib/favorites";
 import { currentHouseholdId } from "@/lib/household";
 import { getXiachufangRecipeDetail } from "@/lib/xiachufang";
 
+import { generateFallbackRecipeSteps } from "@/lib/recipes";
+
 export const runtime = "nodejs";
 
 export async function GET() {
@@ -53,6 +55,19 @@ export async function POST(request: Request) {
         if (!ingredients.length) ingredients = detail.ingredients;
         if (!steps.length) steps = detail.steps;
         if (!tips) tips = detail.tips;
+      }
+    }
+
+    // If steps are still empty, generate fallback steps with LLM
+    if (!steps.length && name) {
+      const fallback = await generateFallbackRecipeSteps(
+        name,
+        ingredients.map((i) => i.name),
+        householdId
+      );
+      if (fallback.steps.length) {
+        steps = fallback.steps;
+        if (!tips) tips = fallback.tips;
       }
     }
 

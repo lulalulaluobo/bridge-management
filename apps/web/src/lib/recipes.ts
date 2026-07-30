@@ -177,6 +177,19 @@ export async function recommendMeals(
         console.warn("Failed to fetch Xiachufang details for dish:", dish.name, err);
       }
 
+      // If steps are still missing (e.g. captcha or no Xiachufang match), generate clear steps with LLM
+      if (!steps || !steps.length) {
+        const fallback = await generateFallbackRecipeSteps(
+          dish.name,
+          [...availableIngredients.map((i) => i.name), ...dish.missingIngredients],
+          householdId
+        );
+        if (fallback.steps.length) {
+          steps = fallback.steps;
+          if (!tips) tips = fallback.tips;
+        }
+      }
+
       return {
         ...dish,
         availableIngredients,
@@ -192,6 +205,52 @@ export async function recommendMeals(
   );
 
   return { dishes: enrichedDishes };
+}
+
+const fallbackStepsSchema = z.object({
+  steps: z.array(z.object({ step: z.number(), desc: z.string() })).min(2).max(12),
+  tips: z.string().optional().default(""),
+});
+
+export async function generateFallbackRecipeSteps(
+  dishName: string,
+  ingredients: string[],
+  householdId = "default-household"
+): Promise<{ steps: Array<{ step: number; desc: string; img?: string }>; tips: string }> {
+  try {
+    const credential = getCredentialStore(householdId).getDecryptedChatCredential();
+    if (!credential) return { steps: [], tips: "" };
+
+    const prompt = `请为家常菜“${dishName}”（主要用料：${ingredients.join("、") || "常见调料与食材"}）编写 4 至 8 步条理清晰的烹饪步骤指南和 1 条大厨小贴士。必须返回合法 JSON，格式为 {"steps":[{"step":1,"desc":"步骤描述..."}],"tips":"小贴士..."}`;
+
+    const response = await fetch(
+      credential.provider === "deepseek" ? "https://api.deepseek.com/v1/chat/completions" : "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${credential.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: credential.chatModel,
+          temperature: 0.3,
+          ...(credential.provider === "deepseek" ? { response_format: { type: "json_object" } } : {}),
+          messages: [
+            { role: "system", content: "你是专业大厨。为指定菜品生成步骤详细、家庭易操作的做菜指南。必须只返回 JSON。" },
+            { role: "user", content: prompt },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) return { steps: [], tips: "" };
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return { steps: [], tips: "" };
+
+    const parsed = fallbackStepsSchema.parse(parseJson(content));
+    return { steps: parsed.steps, tips: parsed.tips || "" };
+  } catch (error) {
+    console.warn("Failed to generate fallback steps for:", dishName, error);
+    return { steps: [], tips: "" };
+  }
 }
 
 function parseJson(content: string) {
