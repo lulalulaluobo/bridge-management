@@ -6,6 +6,7 @@ export function proxy(request: NextRequest) {
   const householdId = request.cookies.get(cookieName)?.value ?? crypto.randomUUID();
   const headers = new Headers(request.headers);
   headers.set("x-fridge-household-id", householdId);
+  headers.set("x-fridge-session-id", request.cookies.get("fridge_session")?.value ?? "");
   const response = NextResponse.next({ request: { headers } });
   if (!request.cookies.get(cookieName)) response.cookies.set(cookieName, householdId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
   return response;

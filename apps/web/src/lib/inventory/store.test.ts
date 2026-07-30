@@ -91,4 +91,11 @@ describe("InventoryStore", () => {
     expect(first.listBatches("2026-07-30")).toHaveLength(1);
     expect(second.listBatches("2026-07-30")).toHaveLength(0);
   });
+
+  it("只为成功写库生成可审计的操作历史", () => {
+    const store = createStore();
+    const result = store.autoConfirm({ type: "add_batches", batches: [{ name: "牛肉", category: "肉类", quantity: 1, unit: "斤", purchasedAt: "2026-07-30", storageLocation: "冷藏室", opened: false }] }, "agent-audit", "agent");
+    expect(result.idempotent).toBe(false);
+    expect(store.listOperationHistory()).toMatchObject([{ source: "agent", action: { type: "add_batches", batches: [{ name: "牛肉" }] } }]);
+  });
 });

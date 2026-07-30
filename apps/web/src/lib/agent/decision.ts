@@ -54,6 +54,8 @@ export async function respondToUser(input: unknown, householdId = "default-house
   } catch (error) {
     const action = fallbackAction();
     if (!action) throw error;
+    const foodProblem = foodActionProblem(action, message, context);
+    if (foodProblem) return { message: foodProblem, speech: foodProblem, mode: "clarify", proposal: null, committed: null };
     return commitAction(store, action, idempotencyKey, householdId);
   }
   const action = decision.action ?? fallbackAction();
@@ -64,6 +66,8 @@ export async function respondToUser(input: unknown, householdId = "default-house
     }
     return { message: decision.message, speech: decision.speech ?? decision.message, mode: decision.mode, proposal: null, committed: null };
   }
+  const foodProblem = foodActionProblem(action, message, context);
+  if (foodProblem) return { message: foodProblem, speech: foodProblem, mode: "clarify", proposal: null, committed: null };
   return commitAction(store, action, idempotencyKey, householdId);
 }
 
@@ -72,7 +76,7 @@ function commitAction(store: ReturnType<typeof getInventoryStore>, action: Propo
     const reply = "已识别食材，请确认是否入库。";
     return { message: reply, speech: reply, mode: "propose", proposal: store.createProposal(action), committed: null };
   }
-  const committed = store.autoConfirm(action, idempotencyKey ?? randomUUID());
+  const committed = store.autoConfirm(action, idempotencyKey ?? randomUUID(), "agent");
   const reply = formatCommittedAction(committed);
   return { message: reply, speech: reply, mode: "reply", proposal: null, committed };
 }
@@ -96,7 +100,7 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
       temperature: 0.2,
       response_format: provider === "deepseek" ? { type: "json_object" } : { type: "json_schema", json_schema: { name: "fridge_agent_decision", strict: false, schema } },
       messages: [
-        { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将“今天/明天”等相对日期转换成 YYYY-MM-DD。用户说“买了/新买/入库”时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用“其他”。用户不必说存放位置或过期日：先匹配“食物默认规则”中同名的规则，再使用“类别默认规则”；存放位置必须取匹配规则的值。未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按同一优先级计算。写入会由后端直接执行，message 不要要求确认。message 里有多个项目时每个项目独占一行，绝不把清单串成一大段。speech 是给语音播报的一句短话，最多 40 个汉字；用户问库存时只说食物名称和数量，绝不说位置或日期。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
+        { role: "system", content: `你是家庭冰箱管理 Agent。当前日期是 ${currentDate}（中国时区）；将“今天/明天”等相对日期转换成 YYYY-MM-DD。用户说“买了/新买/入库”时，只要食物名称明确就输出 add_batches；数量未说时默认 1 份，开封状态默认 opened=false，购买日期默认当前日期，类别可按食物推断、无法推断时用“其他”。绝不能把“嗯、呃、啊、这个、那个、两个、一份、一些、东西”等语气词、代词或数量当成食物；食物名称不明确或不在用户本次对话中出现时，必须 mode=clarify 且 action=null，并反问具体食材。用户不必说存放位置或过期日：先匹配“食物默认规则”中同名的规则，再使用“类别默认规则”；存放位置必须取匹配规则的值。未说明预计过期日时不要输出 expiresAt 字段，绝不能填 null、空字符串或猜测日期，后端会按同一优先级计算。写入会由后端直接执行，message 不要要求确认。message 里有多个项目时每个项目独占一行，绝不把清单串成一大段。speech 是给语音播报的一句短话，最多 40 个汉字；用户问库存时只说食物名称和数量，绝不说位置或日期。只有食物名称或用户意图确实不明确时才 mode=clarify 且 action=null。不要编造库存批次 ID。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(schema)}` },
         ...(context.length ? [{ role: "system" as const, content: `本次库存录入会话完整上下文：${JSON.stringify(context)}。重点处理 status=pending 的食材、纠错与补充，已 committed 的内容只用于理解指代、纠错和写入总结；绝不能因后续纠正丢掉此前仍 pending 的其他食材。` }] : []),
         { role: "system", content: `食物默认规则 JSON：${JSON.stringify(foodDefaults)}` },
         { role: "system", content: `类别默认规则 JSON：${JSON.stringify(defaults)}` },
@@ -141,11 +145,26 @@ export function fallbackPurchaseAction(message: string, purchasedAt: string, def
   const quantity = measured ? parseChineseNumber(measured[1]) : 1;
   const unit = measured?.[2] ?? "份";
   const name = (measured?.[3] ?? raw).trim();
-  if (!name || !Number.isFinite(quantity) || quantity <= 0) return null;
+  if (!name || !Number.isFinite(quantity) || quantity <= 0 || !isPlausibleFoodName(name)) return null;
   const exact = foodDefaults.find((rule) => rule.name === name);
   const category = inferCategory(name);
   const categoryDefault = defaults.find((rule) => rule.category === category);
   return { type: "add_batches", batches: [{ name, category, quantity, unit, purchasedAt, storageLocation: exact?.storageLocation ?? categoryDefault?.storageLocation ?? "冷藏室", opened: false }] };
+}
+
+function foodActionProblem(action: ProposalAction, message: string, context: Array<{ role: "user" | "assistant"; content: string; status?: "pending" | "committed" }>) {
+  if (action.type !== "add_batches") return null;
+  const userText = [message, ...context.filter((item) => item.role === "user").map((item) => item.content)].join(" ").replace(/[\s，。！？!、,.]/gu, "");
+  const invalid = action.batches.find((batch) => !isPlausibleFoodName(batch.name) || !userText.includes(batch.name.replace(/[\s，。！？!、,.]/gu, "")));
+  return invalid ? `“${invalid.name}”不是明确食材。请告诉我具体买了什么食物。` : null;
+}
+
+function isPlausibleFoodName(name: string) {
+  const text = name.trim().replace(/\s+/gu, "");
+  if (!text || text.length > 40 || /^(?:嗯+|呃+|啊+|哦+|唔+|哈+|这个|那个|这|那|东西|食物|一?两?个|一份|一些|一点|几个)$/u.test(text)) return false;
+  if (/^(?:嗯|呃|啊|哦|唔|哈)+(?:一|二|两|三|四|五|六|七|八|九|十|几|[0-9])*(?:个|份|盒|袋|斤|瓶|包)?$/u.test(text)) return false;
+  if (/^[一二两三四五六七八九十0-9]+(?:个|份|盒|袋|斤|瓶|包|克|公斤|千克)?$/u.test(text)) return false;
+  return /[\p{Script=Han}a-zA-Z]/u.test(text);
 }
 
 function parseChineseNumber(value: string) {

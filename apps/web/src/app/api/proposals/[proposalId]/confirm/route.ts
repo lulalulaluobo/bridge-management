@@ -13,7 +13,7 @@ export async function POST(request: Request, context: RouteContext<"/api/proposa
     const body = (await request.json()) as { idempotencyKey?: unknown; conversationId?: unknown };
     if (typeof body.idempotencyKey !== "string") throw new Error("缺少幂等键");
     const householdId = await currentHouseholdId();
-    const result = getInventoryStore(householdId).confirmProposal(proposalId, body.idempotencyKey);
+    const result = getInventoryStore(householdId).confirmProposal(proposalId, body.idempotencyKey, new Date(), "agent");
     if (typeof body.conversationId === "string" && body.conversationId) {
       const conversations = getConversationStore(householdId);
       conversations.markPendingCommitted(body.conversationId, result.proposalId, result.action);

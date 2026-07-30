@@ -22,4 +22,8 @@ describe("agent decision normalization", () => {
     const action = fallbackPurchaseAction("我买了一斤牛肉", "2026-07-30", [{ category: "肉类", shelfLifeDays: 3, storageLocation: "冷藏室" }], []);
     expect(action).toMatchObject({ type: "add_batches", batches: [{ name: "牛肉", category: "肉类", quantity: 1, unit: "斤", storageLocation: "冷藏室" }] });
   });
+
+  it("never treats filler words and quantities as food", () => {
+    expect(fallbackPurchaseAction("我买了呃两个", "2026-07-30", [{ category: "其他", shelfLifeDays: 7, storageLocation: "冷藏室" }], [])).toBeNull();
+  });
 });

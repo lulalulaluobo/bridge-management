@@ -46,6 +46,8 @@ export type ConfirmedWrite = {
   idempotent: boolean;
 };
 
+export type OperationHistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; createdAt: string };
+
 export class InventoryStore {
   constructor(private readonly db: Database.Database, private readonly householdId = DEFAULT_HOUSEHOLD_ID) {
     this.initialize();
@@ -103,6 +105,15 @@ export class InventoryStore {
         result_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS operation_history (
+        id TEXT PRIMARY KEY,
+        household_id TEXT NOT NULL,
+        action_json TEXT NOT NULL,
+        changed_batch_ids_json TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('agent', 'manual')),
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS operation_history_lookup ON operation_history (household_id, created_at DESC);
     `);
 
     const now = new Date().toISOString();
@@ -148,12 +159,12 @@ export class InventoryStore {
     this.db.prepare("DELETE FROM food_default_rules WHERE household_id = ? AND name = ?").run(this.householdId, name.trim());
   }
 
-  autoConfirm(action: ProposalAction, idempotencyKey: string): ConfirmedWrite {
+  autoConfirm(action: ProposalAction, idempotencyKey: string, source: "agent" | "manual" = "manual"): ConfirmedWrite {
     if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("无效的幂等键");
     const existing = this.db.prepare("SELECT result_json FROM write_requests WHERE idempotency_key = ?").get(idempotencyKey) as { result_json: string } | undefined;
     if (existing) return { ...(JSON.parse(existing.result_json) as ConfirmedWrite), idempotent: true };
     const proposal = this.createProposal(action);
-    return this.confirmProposal(proposal.id, idempotencyKey);
+    return this.confirmProposal(proposal.id, idempotencyKey, new Date(), source);
   }
 
   listBatches(today = todayInShanghai()): FoodBatchWithStatus[] {
@@ -167,6 +178,12 @@ export class InventoryStore {
     return row ? toBatch(row) : null;
   }
 
+  listOperationHistory(limit = 100): OperationHistoryItem[] {
+    const rows = this.db.prepare("SELECT id, action_json, changed_batch_ids_json, source, created_at FROM operation_history WHERE household_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(this.householdId, Math.max(1, Math.min(limit, 200))) as Array<{ id: string; action_json: string; changed_batch_ids_json: string; source: "agent" | "manual"; created_at: string }>;
+    return rows.map((row) => ({ id: row.id, action: proposalActionSchema.parse(JSON.parse(row.action_json)), changedBatchIds: JSON.parse(row.changed_batch_ids_json) as string[], source: row.source, createdAt: row.created_at }));
+  }
+
   createProposal(action: ProposalAction, now = new Date()): OperationProposal {
     const normalized = normalizeAction(action, this);
     const id = randomUUID();
@@ -176,7 +193,7 @@ export class InventoryStore {
     return { id, action: normalized, expiresAt };
   }
 
-  confirmProposal(proposalId: string, idempotencyKey: string, now = new Date()): ConfirmedWrite {
+  confirmProposal(proposalId: string, idempotencyKey: string, now = new Date(), source: "agent" | "manual" = "manual"): ConfirmedWrite {
     if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("无效的幂等键");
     const existing = this.db.prepare("SELECT result_json FROM write_requests WHERE idempotency_key = ?").get(idempotencyKey) as { result_json: string } | undefined;
     if (existing) return { ...(JSON.parse(existing.result_json) as ConfirmedWrite), idempotent: true };
@@ -193,6 +210,8 @@ export class InventoryStore {
       this.db.prepare("UPDATE operation_proposals SET state = 'confirmed', confirmed_at = ? WHERE id = ?").run(now.toISOString(), proposalId);
       this.db.prepare("INSERT INTO write_requests (idempotency_key, proposal_id, result_json, created_at) VALUES (?, ?, ?, ?)")
         .run(idempotencyKey, proposalId, JSON.stringify(result), now.toISOString());
+      this.db.prepare("INSERT INTO operation_history (id, household_id, action_json, changed_batch_ids_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), this.householdId, JSON.stringify(action), JSON.stringify(changedBatchIds), source, now.toISOString());
       return result;
     });
     return run();

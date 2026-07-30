@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const body = await request.json() as { action?: unknown; idempotencyKey?: unknown };
     const action = proposalActionSchema.parse(body.action ?? body);
     if (typeof body.idempotencyKey !== "string" || !body.idempotencyKey) throw new Error("缺少幂等键");
-    return NextResponse.json({ result: getInventoryStore(await currentHouseholdId()).autoConfirm(action, body.idempotencyKey) }, { status: 201 });
+    return NextResponse.json({ result: getInventoryStore(await currentHouseholdId()).autoConfirm(action, body.idempotencyKey, "manual") }, { status: 201 });
   } catch (error) {
     return errorResponse(error, "无法写入库存");
   }
