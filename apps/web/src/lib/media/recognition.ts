@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
-import { getCredentialStore } from "@/lib/llm/credentials";
+import { getCredentialStore, providerBaseURL } from "@/lib/llm/credentials";
 import { foodCategories, storageLocations } from "@/lib/inventory/types";
 
 const candidatesSchema = z.object({
@@ -62,7 +62,7 @@ B) 购物小票/发票/收据/购物清单 → 从凭证文字中提取食物项
   const systemPrompt = isQwen
     ? `${basePrompt}。格式：{"candidates":[{"name":"食物名(必须中文)","category":"蔬菜","quantity":1,"unit":"份","storageLocation":"冷藏室","opened":false}]}。category 只能是：${foodCategories.join("、")}；storageLocation 只能是：${storageLocations.join("、")}。`
     : `${basePrompt}。格式为 ${JSON.stringify(candidatesSchema.toJSONSchema({ target: "draft-7" }))}`;
-  const response = await fetch(isQwen ? "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" : "https://api.openai.com/v1/chat/completions", {
+  const response = await fetch(`${providerBaseURL(credential.provider, credential.baseUrl) ?? "https://api.openai.com/v1"}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${credential.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({

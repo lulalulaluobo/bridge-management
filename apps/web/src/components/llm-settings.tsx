@@ -1,78 +1,169 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { CredentialSummary } from "@/lib/llm/credentials";
+import { providerDefaults, type CredentialSummary, type Provider } from "@/lib/llm/credentials";
 
-export function LlmSettings({ initialCredentials }: { initialCredentials: CredentialSummary[] }) {
-  const [credentials, setCredentials] = useState(initialCredentials);
-  const [apiKeys, setApiKeys] = useState<Record<"deepseek" | "qwen", string>>({ deepseek: "", qwen: "" });
+const PROVIDERS = Object.keys(providerDefaults) as Provider[];
+
+export function LlmSettings({ onBack }: { onBack?: () => void }) {
+  const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [provider, setProvider] = useState<Provider>("qwen");
+  const [model, setModel] = useState<string>(providerDefaults.qwen.defaultModel);
+  const [label, setLabel] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
 
-  async function saveKey(event: React.FormEvent<HTMLFormElement>, provider: "deepseek" | "qwen") {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const response = await fetch("/api/settings/llm-credentials");
+        const data = (await response.json()) as { credentials?: CredentialSummary[] };
+        if (!cancelled && data.credentials) setCredentials(data.credentials);
+      } catch { /* 忽略 */ } finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 3600);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  function resetForm() { setApiKey(""); setLabel(""); }
+
+  function chooseProvider(next: Provider) {
+    setProvider(next);
+    setModel(providerDefaults[next].defaultModel);
+    setBaseUrl(next === "custom" ? "" : providerDefaults[next].baseURL ?? "");
+  }
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
-    setNotice("");
+    setBusy(true); setNotice("");
     try {
       const response = await fetch("/api/settings/llm-credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, apiKey: apiKeys[provider] }),
+        body: JSON.stringify({ provider, apiKey, model, label: label || undefined, baseUrl: provider === "custom" ? baseUrl : undefined }),
       });
       const data = (await response.json()) as { credential?: CredentialSummary; error?: string };
-      if (!response.ok || !data.credential) throw new Error(data.error ?? "无法保存模型 Key");
-      setCredentials((current) => orderCredentials([...current.filter((credential) => credential.provider !== data.credential!.provider), data.credential!]));
-      setApiKeys((current) => ({ ...current, [provider]: "" }));
-      setNotice("模型 Key 已验证并加密保存。页面不会再次显示完整 Key。");
+      if (!response.ok || !data.credential) throw new Error(data.error ?? "无法保存模型配置");
+      setCredentials((current) => current.map((item) => ({ ...item, isActive: false })).some((item) => item.id === data.credential!.id)
+        ? current.map((item) => (item.id === data.credential!.id ? data.credential! : item))
+        : [data.credential!, ...current]);
+      resetForm();
+      setNotice(`已保存并启用：${data.credential.label}（${data.credential.chatModel}）`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "无法保存模型 Key");
-    } finally {
-      setBusy(false);
-    }
+      setNotice(error instanceof Error ? error.message : "无法保存模型配置");
+    } finally { setBusy(false); }
   }
 
-  async function removeKey(providerToDelete: CredentialSummary["provider"]) {
-    setBusy(true);
-    setNotice("");
+  async function activate(id: string) {
+    setBusy(true); setNotice("");
     try {
-      const response = await fetch("/api/settings/llm-credentials", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: providerToDelete }),
+      const response = await fetch("/api/settings/llm-credentials", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: "activate" }) });
+      const data = (await response.json()) as { credential?: CredentialSummary; error?: string };
+      if (!response.ok || !data.credential) throw new Error(data.error ?? "无法切换启用项");
+      setCredentials((current) => current.map((item) => ({ ...item, isActive: item.id === data.credential!.id })));
+      setNotice(`已切换启用：${data.credential.label}`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "无法切换启用项"); } finally { setBusy(false); }
+  }
+
+  async function remove(id: string, displayName: string) {
+    if (!window.confirm(`确定删除「${displayName}」的模型配置吗？`)) return;
+    setBusy(true); setNotice("");
+    try {
+      const response = await fetch("/api/settings/llm-credentials", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      if (!response.ok) { const data = (await response.json()) as { error?: string }; throw new Error(data.error ?? "无法删除模型配置"); }
+      setCredentials((current) => {
+        const filtered = current.filter((item) => item.id !== id);
+        const nextActive = filtered.find((item) => item.isActive) ?? filtered[0];
+        return filtered.map((item) => ({ ...item, isActive: item.id === nextActive?.id }));
       });
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? "无法删除模型 Key");
-      }
-      setCredentials((current) => current.filter((credential) => credential.provider !== providerToDelete));
-      setNotice("模型 Key 已删除，后续智能请求不会再使用它。");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "无法删除模型 Key");
-    } finally {
-      setBusy(false);
-    }
+      setNotice("已删除该模型配置");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "无法删除模型配置"); } finally { setBusy(false); }
   }
 
   return (
-    <details className="rounded-3xl bg-white p-4 shadow-sm">
-      <summary className="cursor-pointer text-sm font-semibold">高级设置：我的模型 Key</summary>
-      <p className="mt-2 text-sm leading-6 text-slate-600">Key 仅通过 HTTPS 提交，服务端验证后使用部署密钥加密保存。它不会写入浏览器存储、页面、日志或导出文件。</p>
-      {([{ provider: "deepseek", title: "DeepSeek 对话", model: "deepseek-chat", description: "用于文字与语音转写后的 Agent 对话。" }, { provider: "qwen", title: "千问视觉", model: "Qwen-VL-Max", description: "用于拍照识别采购食材，调用千问兼容接口。" }] as const).map((config) => {
-        const credential = credentials.find((item) => item.provider === config.provider);
-        return <form key={config.provider} className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3" onSubmit={(event) => void saveKey(event, config.provider)}><div><p className="font-semibold">{config.title}</p><p className="mt-1 text-xs leading-5 text-slate-600">固定模型：{config.model}。{config.description}</p></div>{credential && <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-950"><p>{credential.keyMask} · 已启用</p><button type="button" disabled={busy} onClick={() => removeKey(config.provider)} className="mt-2 font-semibold underline disabled:opacity-50">删除此 Key</button></div>}<label className="grid gap-1 text-sm font-medium">{config.title} API Key<input type="password" autoComplete="off" required minLength={20} value={apiKeys[config.provider]} onChange={(event) => setApiKeys((current) => ({ ...current, [config.provider]: event.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2" placeholder="sk-..." /></label><button disabled={busy} className="rounded-xl bg-[#173f35] px-4 py-3 font-semibold text-white disabled:opacity-50">验证并{credential ? "轮换" : "保存"} Key</button></form>;
-      })}
-      <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">语音转文字固定使用本地 Paraformer，不需要 Key 或模型设置。</p>
-      {notice && <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-sm" role="status">{notice}</p>}
-    </details>
+    <section className="mt-7">
+      {onBack && (
+        <button type="button" onClick={onBack} className="fixed bottom-24 left-4 z-50 flex items-center gap-2 rounded-full border border-white/40 bg-[#173f35]/90 px-4 py-2.5 text-xs font-bold text-white shadow-[0_8px_24px_rgba(23,63,53,.35)] backdrop-blur-xl transition active:scale-95">
+          <span className="text-sm font-black">←</span><span>返回</span>
+        </button>
+      )}
+      <div><h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">模型设置</h2><p className="mt-0.5 text-sm text-[#6f8178]">保存一条模型配置即同时用于对话与拍照识别。</p></div>
+
+      <div className="mt-5 rounded-[24px] bg-white p-4 shadow-[0_3px_14px_rgba(23,63,53,.05)]">
+        <p className="text-xs leading-5 text-[#64736c]">请选择一个支持视觉（多模态）的模型，例如 Qwen-VL、GPT-4o。Key 仅经 HTTPS 提交，服务端验证后加密保存，不会写入浏览器、日志或导出文件。语音转写优先用本地服务，仅 OpenAI 可作云端兜底。</p>
+        <form className="mt-4 grid gap-4" onSubmit={save}>
+          <Field label="模型供应商">
+            <div className="grid grid-cols-2 gap-2">
+              {PROVIDERS.map((item) => (
+                <button key={item} type="button" onClick={() => chooseProvider(item)} className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition ${provider === item ? "bg-[#173f35] text-white shadow-sm" : "bg-[#f0f2ed] text-[#53635b]"}`}>
+                  {providerDefaults[item].title}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs leading-5 text-[#74827a]">{providerDefaults[provider].description}</p>
+          </Field>
+          <Field label="模型名">
+            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder={providerDefaults[provider].defaultModel || "如 qwen-vl-max"} />
+          </Field>
+          <Field label="备注名（可选）">
+            <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="如 我的千问主号" />
+          </Field>
+          {provider === "custom" && (
+            <Field label="Base URL（自定义兼容端点）">
+              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="如 https://openrouter.ai/api/v1" />
+            </Field>
+          )}
+          <Field label="API Key">
+            <input type="password" autoComplete="off" required minLength={20} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." />
+          </Field>
+          <button disabled={busy} className="rounded-2xl bg-[#173f35] py-3.5 font-semibold text-white shadow-lg disabled:opacity-50">{busy ? "验证中…" : "验证并保存（自动启用）"}</button>
+        </form>
+      </div>
+
+      <div className="mt-5">
+        <h3 className="px-1 text-sm font-semibold text-[#6f8178]">已保存的模型（{credentials.length}）</h3>
+        {loading ? (
+          <p className="mt-3 rounded-[22px] bg-white px-5 py-8 text-center text-sm text-[#74827a] shadow-[0_3px_14px_rgba(23,63,53,.05)]">加载中…</p>
+        ) : credentials.length === 0 ? (
+          <p className="mt-3 rounded-[22px] bg-white px-5 py-10 text-center text-sm text-[#74827a] shadow-[0_3px_14px_rgba(23,63,53,.05)]">还没有保存的模型配置。</p>
+        ) : (
+          <div className="mt-3 grid gap-3">
+            {credentials.map((item) => (
+              <article key={item.id} className={`rounded-[22px] bg-white p-4 shadow-[0_3px_14px_rgba(23,63,53,.05)] ${item.isActive ? "ring-2 ring-[#173f35]" : ""}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-bold text-[#173f35]">{item.label}</span>
+                      {item.isActive && <span className="shrink-0 rounded-full bg-[#dcece3] px-2 py-0.5 text-[11px] font-semibold text-[#173f35]">启用中</span>}
+                    </div>
+                    <p className="mt-1 truncate text-xs text-[#66756d]">{providerDefaults[item.provider].title} · {item.chatModel} · {item.keyMask}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  {!item.isActive && <button type="button" disabled={busy} onClick={() => void activate(item.id)} className="flex-1 rounded-xl bg-[#173f35] py-2 text-sm font-semibold text-white disabled:opacity-50">启用</button>}
+                  <button type="button" disabled={busy} onClick={() => void remove(item.id, item.label)} className={`${item.isActive ? "flex-1" : ""} rounded-xl bg-rose-50 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50`}>删除</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {notice && <p role="status" className="fixed inset-x-5 top-[max(1rem,env(safe-area-inset-top))] z-40 mx-auto max-w-md rounded-full bg-white/95 px-4 py-2 text-center text-sm font-medium text-[#405148] shadow-lg backdrop-blur-xl">{notice}</p>}
+    </section>
   );
 }
 
-function orderCredentials(credentials: CredentialSummary[]) {
-  return [...credentials].sort((left, right) => {
-    if (left.provider === right.provider) return 0;
-    if (left.provider === "deepseek") return -1;
-    if (right.provider === "deepseek") return 1;
-    return left.provider === "qwen" ? -1 : 1;
-  });
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="grid gap-1.5 text-sm font-semibold text-[#53635b]">{label}<span className="[&_input]:w-full [&_input]:rounded-xl [&_input]:border-0 [&_input]:bg-[#f0f2ed] [&_input]:px-3 [&_input]:py-3">{children}</span></label>;
 }

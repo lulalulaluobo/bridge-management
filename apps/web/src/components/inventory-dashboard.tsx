@@ -10,14 +10,13 @@ import { MealRecommendationCards, MealRecommendations } from "@/components/meal-
 import { NotificationControl } from "@/components/notification-control";
 import { ShelfLifeSettings } from "@/components/shelf-life-settings";
 import { foodCategories, storageLocations, type FoodBatchWithStatus, type OperationProposal, type ProposalAction } from "@/lib/inventory/types";
-import type { CredentialSummary } from "@/lib/llm/credentials";
 import type { FoodCandidate } from "@/lib/media/recognition";
 import type { FoodPreferences } from "@/lib/preferences";
 import type { MealRecommendations as MealRecommendationsData } from "@/lib/recipes";
 
 type AddForm = { name: string; category: (typeof foodCategories)[number]; quantity: string; unit: string; purchasedAt: string; storageLocation: (typeof storageLocations)[number]; opened: boolean };
 type Tab = "today" | "inventory" | "recipes" | "more";
-type SubPage = "none" | "history" | "favorites";
+type SubPage = "none" | "history" | "favorites" | "llm";
 type HistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; detail: string; createdAt: string };
 type BatchChanges = Extract<ProposalAction, { type: "update_batch" }>["changes"];
 type AgentPhase = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
@@ -57,7 +56,7 @@ async function compressImage(file: File, maxSize = 1920, quality = 0.75): Promis
   });
 }
 
-export function InventoryDashboard({ username, initialBatches, initialCredentials, initialPreferences, vapidPublicKey }: { username: string; initialBatches: FoodBatchWithStatus[]; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string }) {
+export function InventoryDashboard({ username, initialBatches, initialPreferences, vapidPublicKey }: { username: string; initialBatches: FoodBatchWithStatus[]; initialPreferences: FoodPreferences; vapidPublicKey: string }) {
   const [batches, setBatches] = useState(initialBatches);
   const [form, setForm] = useState<AddForm>(initialForm);
   const [photoCandidates, setPhotoCandidates] = useState<FoodCandidate[] | null>(null);
@@ -220,11 +219,12 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
     <div className={`mx-auto w-full max-w-xl px-4 sm:px-5 pt-[max(1.2rem,env(safe-area-inset-top))] ${tab === "today" && subPage === "none" ? "h-full" : ""}`}>
       {subPage === "history" && <HistoryView items={history} onBack={() => setSubPage("none")} />}
       {subPage === "favorites" && <FavoritesView onBack={() => setSubPage("none")} />}
+      {subPage === "llm" && <LlmSettings onBack={() => setSubPage("none")} />}
       {subPage === "none" && <>
         {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
         {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
         {tab === "recipes" && <RecipesTab initialPreferences={initialPreferences} />}
-        {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} onOpenHistory={() => setSubPage("history")} onOpenFavorites={() => setSubPage("favorites")} />}
+        {tab === "more" && <MoreView username={username} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} onOpenHistory={() => setSubPage("history")} onOpenFavorites={() => setSubPage("favorites")} onOpenLlm={() => setSubPage("llm")} />}
       </>}
     </div>
     {notice && tab !== "today" && <p role="status" className="fixed inset-x-5 top-[max(1rem,env(safe-area-inset-top))] z-40 mx-auto max-w-md rounded-full bg-white/95 px-4 py-2 text-center text-sm font-medium text-[#405148] shadow-lg backdrop-blur-xl">{notice}</p>}
@@ -246,7 +246,7 @@ function RecipesTab({ initialPreferences }: { initialPreferences: FoodPreference
   </section>;
 }
 
-function MoreView({ username, initialCredentials, initialPreferences, vapidPublicKey, onOpenHistory, onOpenFavorites }: { username: string; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string; onOpenHistory: () => void; onOpenFavorites: () => void }) {
+function MoreView({ username, initialPreferences, vapidPublicKey, onOpenHistory, onOpenFavorites, onOpenLlm }: { username: string; initialPreferences: FoodPreferences; vapidPublicKey: string; onOpenHistory: () => void; onOpenFavorites: () => void; onOpenLlm: () => void }) {
   return <section className="mt-7 grid gap-5">
     <div><h2 className="text-[25px] font-bold tracking-[-.04em]">更多</h2><p className="mt-1 text-sm text-[#6f8178]">偏好、提醒与模型设置</p></div>
     <div className="grid grid-cols-2 gap-3">
@@ -258,12 +258,16 @@ function MoreView({ username, initialCredentials, initialPreferences, vapidPubli
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-[#173f35]"><Icon name="history" /></div>
         <div><h3 className="text-sm font-bold text-[#173f35]">操作记录</h3><p className="text-[11px] text-[#6f8178]">全家共享日志</p></div>
       </button>
+      <button type="button" onClick={onOpenLlm} className="col-span-2 flex items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_3px_14px_rgba(23,63,53,.05)] transition active:scale-95">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-50 text-[#173f35]"><Icon name="sliders" /></div>
+        <div><h3 className="text-sm font-bold text-[#173f35]">模型设置</h3><p className="text-[11px] text-[#6f8178]">保存并选用对话 / 拍照识别模型</p></div>
+        <span className="ml-auto text-lg font-black text-[#aab6af]">›</span>
+      </button>
     </div>
     <AccountSettings username={username} />
     <AgentWriteSettings />
     <NotificationControl vapidPublicKey={vapidPublicKey} />
     <ShelfLifeSettings />
-    <LlmSettings initialCredentials={initialCredentials} />
   </section>;
 }
 

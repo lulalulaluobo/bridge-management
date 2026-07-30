@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { getAgentSettingsStore } from "@/lib/agent/settings";
 import { type ConfirmedWrite, getInventoryStore } from "@/lib/inventory/store";
-import { getCredentialStore } from "@/lib/llm/credentials";
+import { getCredentialStore, providerBaseURL } from "@/lib/llm/credentials";
 import { foodCategories, proposalActionSchema, type FoodBatch, type OperationProposal, type ProposalAction } from "@/lib/inventory/types";
 
 const decisionSchema = z.object({
@@ -50,7 +50,7 @@ export async function respondToUser(input: unknown, householdId = "default-house
   const fallbackAction = () => fallbackPurchaseAction(message, currentDate, defaults, foodDefaults);
   let decision: z.infer<typeof decisionSchema> | null = null;
   try {
-    decision = await requestStructuredDecision(credential.apiKey, credential.chatModel, message, context, inventory, defaults, foodDefaults, credential.provider, currentDate);
+    decision = await requestStructuredDecision(credential.apiKey, credential.chatModel, credential.baseUrl, message, context, inventory, defaults, foodDefaults, credential.provider, currentDate);
   } catch (error) {
     const action = fallbackAction();
     if (!action) throw error;
@@ -81,7 +81,7 @@ function commitAction(store: ReturnType<typeof getInventoryStore>, action: Propo
   return { message: reply, speech: reply, mode: "reply", proposal: null, committed };
 }
 
-async function requestStructuredDecision(apiKey: string, model: string, message: string, context: Array<{ role: "user" | "assistant"; content: string; status?: "pending" | "committed" }>, inventory: unknown[], defaults: unknown[], foodDefaults: unknown[], provider: "openai" | "deepseek", currentDate: string) {
+async function requestStructuredDecision(apiKey: string, model: string, baseUrl: string | null, message: string, context: Array<{ role: "user" | "assistant"; content: string; status?: "pending" | "committed" }>, inventory: unknown[], defaults: unknown[], foodDefaults: unknown[], provider: "openai" | "deepseek" | "qwen" | "custom", currentDate: string) {
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -92,7 +92,7 @@ async function requestStructuredDecision(apiKey: string, model: string, message:
       action: { anyOf: [{ type: "null" }, proposalActionSchema.toJSONSchema({ target: "draft-7" })] },
     },
   };
-  const response = await fetch(provider === "deepseek" ? "https://api.deepseek.com/v1/chat/completions" : "https://api.openai.com/v1/chat/completions", {
+  const response = await fetch(`${providerBaseURL(provider, baseUrl) ?? "https://api.openai.com/v1"}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { getInventoryStore } from "@/lib/inventory/store";
-import { getCredentialStore } from "@/lib/llm/credentials";
+import { getCredentialStore, providerBaseURL } from "@/lib/llm/credentials";
 import { type FoodCandidate } from "@/lib/media/recognition";
 import { type FoodPreferences } from "@/lib/preferences";
 import { getXiachufangRecipeDetail, searchXiachufang } from "@/lib/xiachufang";
@@ -97,7 +97,7 @@ export async function recommendMeals(
   const extraContext = params.extraConditions ? `额外条件/用户特别要求：${params.extraConditions}` : "";
 
   const response = await fetch(
-    credential.provider === "deepseek" ? "https://api.deepseek.com/v1/chat/completions" : "https://api.openai.com/v1/chat/completions",
+    `${providerBaseURL(credential.provider, credential.baseUrl) ?? "https://api.openai.com/v1"}/chat/completions`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${credential.apiKey}`, "Content-Type": "application/json" },
@@ -224,7 +224,7 @@ export async function generateFallbackRecipeSteps(
     const prompt = `请为家常菜“${dishName}”（主要用料：${ingredients.join("、") || "常见调料与食材"}）编写 4 至 8 步条理清晰的烹饪步骤指南和 1 条大厨小贴士。必须返回合法 JSON，格式为 {"steps":[{"step":1,"desc":"步骤描述..."}],"tips":"小贴士..."}`;
 
     const response = await fetch(
-      credential.provider === "deepseek" ? "https://api.deepseek.com/v1/chat/completions" : "https://api.openai.com/v1/chat/completions",
+      `${providerBaseURL(credential.provider, credential.baseUrl) ?? "https://api.openai.com/v1"}/chat/completions`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${credential.apiKey}`, "Content-Type": "application/json" },
