@@ -408,7 +408,17 @@ export function CookingModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f3f4f0] pb-24 text-[#17231f]">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f3f4f0] pb-32 text-[#17231f]">
+      {/* Floating Bottom-Left Return Button for ergonomic one-handed operation */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="fixed bottom-24 left-4 z-50 flex items-center gap-2 rounded-full border border-white/40 bg-[#173f35]/90 px-4 py-2.5 text-xs font-bold text-white shadow-[0_8px_24px_rgba(23,63,53,.35)] backdrop-blur-xl transition active:scale-95"
+      >
+        <span className="text-sm font-black">←</span>
+        <span>返回</span>
+      </button>
+
       <div className="mx-auto w-full max-w-xl">
         {/* Header photo & title */}
         <div className="relative h-60 w-full bg-slate-800">
@@ -420,15 +430,6 @@ export function CookingModal({
             </div>
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
-
-          {/* Top Left Return Button */}
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute left-4 top-[max(1rem,env(safe-area-inset-top))] flex items-center gap-1.5 rounded-full bg-black/60 px-4 py-2 text-xs font-bold text-white shadow-lg backdrop-blur-md transition active:scale-95"
-          >
-            ← 返回
-          </button>
 
           <div className="absolute bottom-4 left-5 right-5">
             <h2 className="text-2xl font-bold text-white tracking-tight">{recipe.name}</h2>

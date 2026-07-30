@@ -45,22 +45,22 @@ export function FavoritesView({ embedded = false, onBack }: { embedded?: boolean
 
   return (
     <section className={embedded ? "" : "mt-7"}>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="fixed bottom-24 left-4 z-50 flex items-center gap-2 rounded-full border border-white/40 bg-[#173f35]/90 px-4 py-2.5 text-xs font-bold text-white shadow-[0_8px_24px_rgba(23,63,53,.35)] backdrop-blur-xl transition active:scale-95"
+        >
+          <span className="text-sm font-black">←</span>
+          <span>返回</span>
+        </button>
+      )}
+
       {!embedded ? (
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="flex items-center gap-1 rounded-full border border-white/80 bg-white/80 px-3.5 py-1.5 text-xs font-bold text-[#173f35] shadow-sm backdrop-blur-xl transition active:scale-95"
-              >
-                ← 返回
-              </button>
-            )}
-            <div>
-              <h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">收藏菜谱</h2>
-              <p className="mt-0.5 text-sm text-[#6f8178]">{recipes.length} 道已收藏菜谱 · 照着页面轻松做饭</p>
-            </div>
+          <div>
+            <h2 className="text-[25px] font-bold tracking-[-.04em] text-[#17231f]">收藏菜谱</h2>
+            <p className="mt-0.5 text-sm text-[#6f8178]">{recipes.length} 道已收藏菜谱 · 照着页面轻松做饭</p>
           </div>
         </div>
       ) : (

@@ -235,12 +235,8 @@ function MoreView({ username, initialCredentials, initialPreferences, vapidPubli
 
 function HistoryView({ items, embedded = false, onBack }: { items: HistoryItem[]; embedded?: boolean; onBack?: () => void }) {
   return <section className={embedded ? "" : "mt-7"}>
-    {!embedded && <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        {onBack && <button type="button" onClick={onBack} className="flex items-center gap-1 rounded-full border border-white/80 bg-white/80 px-3.5 py-1.5 text-xs font-bold text-[#173f35] shadow-sm backdrop-blur-xl transition active:scale-95">← 返回</button>}
-        <div><h2 className="text-[25px] font-bold tracking-[-.04em]">操作历史记录</h2><p className="mt-0.5 text-sm text-[#6f8178]">全家共享；可核对 Agent 实际执行的写库操作。</p></div>
-      </div>
-    </div>}
+    {onBack && <button type="button" onClick={onBack} className="fixed bottom-24 left-4 z-50 flex items-center gap-2 rounded-full border border-white/40 bg-[#173f35]/90 px-4 py-2.5 text-xs font-bold text-white shadow-[0_8px_24px_rgba(23,63,53,.35)] backdrop-blur-xl transition active:scale-95"><span className="text-sm font-black">←</span><span>返回</span></button>}
+    {!embedded && <div><h2 className="text-[25px] font-bold tracking-[-.04em]">操作历史记录</h2><p className="mt-0.5 text-sm text-[#6f8178]">全家共享；可核对 Agent 实际执行的写库操作。</p></div>}
     <div className={`${embedded ? "mt-2" : "mt-5"} overflow-hidden rounded-[24px] bg-white shadow-[0_3px_14px_rgba(23,63,53,.05)]`}>
       {items.length ? items.map((item, index) => <article key={item.id} className={`px-4 py-3.5 ${index ? "border-t border-[#edf0eb]" : ""}`}><div className="flex items-start justify-between gap-3"><p className="min-w-0 font-semibold leading-6">{item.detail}</p><span className={`mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${item.source === "agent" ? "bg-[#dcece3] text-[#173f35]" : "bg-[#eef1ee] text-[#66756d]"}`}>{item.source === "agent" ? "Agent" : "手动"}</span></div><p className="mt-1 text-xs text-[#74827a]">{new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.createdAt))}</p></article>) : <p className="px-5 py-12 text-center text-sm text-[#74827a]">还没有操作记录。</p>}
     </div>
