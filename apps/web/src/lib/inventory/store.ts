@@ -46,7 +46,7 @@ export type ConfirmedWrite = {
   idempotent: boolean;
 };
 
-export type OperationHistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; createdAt: string };
+export type OperationHistoryItem = { id: string; action: ProposalAction; changedBatchIds: string[]; source: "agent" | "manual"; detail: string; createdAt: string };
 
 export class InventoryStore {
   constructor(private readonly db: Database.Database, private readonly householdId = DEFAULT_HOUSEHOLD_ID) {
@@ -111,6 +111,7 @@ export class InventoryStore {
         action_json TEXT NOT NULL,
         changed_batch_ids_json TEXT NOT NULL,
         source TEXT NOT NULL CHECK (source IN ('agent', 'manual')),
+        detail TEXT,
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS operation_history_lookup ON operation_history (household_id, created_at DESC);
@@ -120,6 +121,8 @@ export class InventoryStore {
     const categoryDefaultColumns = this.db.prepare("PRAGMA table_info(category_defaults)").all() as Array<{ name: string }>;
     const needsStorageDefaultsMigration = !categoryDefaultColumns.some((column) => column.name === "storage_location");
     if (needsStorageDefaultsMigration) this.db.exec("ALTER TABLE category_defaults ADD COLUMN storage_location TEXT NOT NULL DEFAULT '冷藏室'");
+    const historyColumns = this.db.prepare("PRAGMA table_info(operation_history)").all() as Array<{ name: string }>;
+    if (!historyColumns.some((column) => column.name === "detail")) this.db.exec("ALTER TABLE operation_history ADD COLUMN detail TEXT");
     this.db.prepare("INSERT OR IGNORE INTO households (id, created_at) VALUES (?, ?)").run(this.householdId, now);
     const defaults: Array<[FoodBatch["category"], number, FoodBatch["storageLocation"]]> = [["蔬菜", 4, "冷藏室"], ["水果", 7, "冷藏室"], ["乳制品", 7, "冷藏室"], ["肉类", 3, "冷藏室"], ["海鲜", 2, "冷冻室"], ["主食", 30, "常温柜"], ["饮料", 14, "常温柜"], ["其他", 7, "冷藏室"]];
     const insert = this.db.prepare("INSERT OR IGNORE INTO category_defaults (household_id, category, shelf_life_days, storage_location) VALUES (?, ?, ?, ?)");
@@ -179,9 +182,13 @@ export class InventoryStore {
   }
 
   listOperationHistory(limit = 100): OperationHistoryItem[] {
-    const rows = this.db.prepare("SELECT id, action_json, changed_batch_ids_json, source, created_at FROM operation_history WHERE household_id = ? ORDER BY created_at DESC LIMIT ?")
-      .all(this.householdId, Math.max(1, Math.min(limit, 200))) as Array<{ id: string; action_json: string; changed_batch_ids_json: string; source: "agent" | "manual"; created_at: string }>;
-    return rows.map((row) => ({ id: row.id, action: proposalActionSchema.parse(JSON.parse(row.action_json)), changedBatchIds: JSON.parse(row.changed_batch_ids_json) as string[], source: row.source, createdAt: row.created_at }));
+    const rows = this.db.prepare("SELECT id, action_json, changed_batch_ids_json, source, detail, created_at FROM operation_history WHERE household_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?")
+      .all(this.householdId, Math.max(1, Math.min(limit, 200))) as Array<{ id: string; action_json: string; changed_batch_ids_json: string; source: "agent" | "manual"; detail: string | null; created_at: string }>;
+    return rows.map((row) => {
+      const action = proposalActionSchema.parse(JSON.parse(row.action_json));
+      const changedBatchIds = JSON.parse(row.changed_batch_ids_json) as string[];
+      return { id: row.id, action, changedBatchIds, source: row.source, detail: row.detail ?? this.describeHistoryAction(action), createdAt: row.created_at };
+    });
   }
 
   createProposal(action: ProposalAction, now = new Date()): OperationProposal {
@@ -205,13 +212,14 @@ export class InventoryStore {
       const state = this.db.prepare("SELECT state FROM operation_proposals WHERE id = ?").get(proposalId) as { state: string };
       if (state.state !== "pending") throw new Error("此操作已处理，请刷新后查看库存");
       const action = proposalActionSchema.parse(JSON.parse(row.action_json));
+      const detail = this.describeHistoryAction(action);
       const changedBatchIds = this.applyAction(action, now.toISOString());
       const result: ConfirmedWrite = { proposalId, action, changedBatchIds, idempotent: false };
       this.db.prepare("UPDATE operation_proposals SET state = 'confirmed', confirmed_at = ? WHERE id = ?").run(now.toISOString(), proposalId);
       this.db.prepare("INSERT INTO write_requests (idempotency_key, proposal_id, result_json, created_at) VALUES (?, ?, ?, ?)")
         .run(idempotencyKey, proposalId, JSON.stringify(result), now.toISOString());
-      this.db.prepare("INSERT INTO operation_history (id, household_id, action_json, changed_batch_ids_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(randomUUID(), this.householdId, JSON.stringify(action), JSON.stringify(changedBatchIds), source, now.toISOString());
+      this.db.prepare("INSERT INTO operation_history (id, household_id, action_json, changed_batch_ids_json, source, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), this.householdId, JSON.stringify(action), JSON.stringify(changedBatchIds), source, detail, now.toISOString());
       return result;
     });
     return run();
@@ -247,6 +255,20 @@ export class InventoryStore {
         this.db.prepare("UPDATE food_batches SET deleted_at = ?, updated_at = ? WHERE id = ?").run(timestamp, timestamp, action.batchId);
         return [action.batchId];
     }
+  }
+
+  private describeHistoryAction(action: ProposalAction) {
+    if (action.type === "add_batches") return `入库：${action.batches.map((batch) => `${batch.name} ${batch.quantity}${batch.unit}`).join("、")}`;
+    const batch = this.findBatchIncludingDeleted(action.batchId);
+    const name = batch?.name ?? "未知食材";
+    if (action.type === "consume_batch") return `消耗：${name} ${action.quantity}${batch?.unit ?? ""}`;
+    if (action.type === "soft_delete_batch") return `移除：${name}`;
+    const changes = Object.entries(action.changes).map(([key, value]) => `${({ name: "名称", quantity: "数量", unit: "单位", purchasedAt: "购买日期", expiresAt: "过期日", storageLocation: "位置", opened: "开封状态", category: "类别" } as Record<string, string>)[key] ?? key} ${key === "opened" ? (value ? "已开封" : "未开封") : String(value)}`);
+    return `修改：${name}${changes.length ? `（${changes.join("，")}）` : ""}`;
+  }
+
+  private findBatchIncludingDeleted(batchId: string) {
+    return this.db.prepare("SELECT * FROM food_batches WHERE id = ? AND household_id = ?").get(batchId, this.householdId) as BatchRow | undefined;
   }
 
   private requireBatch(batchId: string): FoodBatch {

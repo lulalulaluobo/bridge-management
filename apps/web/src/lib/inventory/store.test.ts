@@ -96,6 +96,15 @@ describe("InventoryStore", () => {
     const store = createStore();
     const result = store.autoConfirm({ type: "add_batches", batches: [{ name: "牛肉", category: "肉类", quantity: 1, unit: "斤", purchasedAt: "2026-07-30", storageLocation: "冷藏室", opened: false }] }, "agent-audit", "agent");
     expect(result.idempotent).toBe(false);
-    expect(store.listOperationHistory()).toMatchObject([{ source: "agent", action: { type: "add_batches", batches: [{ name: "牛肉" }] } }]);
+    expect(store.listOperationHistory()).toMatchObject([{ source: "agent", detail: "入库：牛肉 1斤", action: { type: "add_batches", batches: [{ name: "牛肉" }] } }]);
+  });
+
+  it("在历史中保留消耗和移除的食材明细", () => {
+    const store = createStore();
+    const add = store.autoConfirm({ type: "add_batches", batches: [{ name: "鸡蛋", category: "其他", quantity: 6, unit: "个", purchasedAt: "2026-07-30", storageLocation: "冷藏室", opened: false }] }, "history-add");
+    const batchId = add.changedBatchIds[0];
+    store.autoConfirm({ type: "consume_batch", batchId, quantity: 2 }, "history-consume");
+    store.autoConfirm({ type: "soft_delete_batch", batchId }, "history-delete");
+    expect(store.listOperationHistory().map((item) => item.detail)).toEqual(["移除：鸡蛋", "消耗：鸡蛋 2个", "入库：鸡蛋 6个"]);
   });
 });
