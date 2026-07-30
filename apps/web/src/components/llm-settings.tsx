@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { providerDefaults, type CredentialSummary, type Provider } from "@/lib/llm/credentials";
+import { providerDefaults, type CredentialSummary, type Provider } from "@/lib/llm/types";
 
 const PROVIDERS = Object.keys(providerDefaults) as Provider[];
 
