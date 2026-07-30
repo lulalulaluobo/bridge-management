@@ -1,0 +1,16 @@
+# standard ignores
+.gemini/
+.obsidian/workspace.json
+node_modules/
+dist/
+.next/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+references/
+*.db-shm
+*.db-wal
+*.log
