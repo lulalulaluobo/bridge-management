@@ -44,7 +44,7 @@ function normalizeLocation(loc: string): (typeof storageLocations)[number] {
 
 export async function recognizeFoodImage(file: File, householdId = "default-household"): Promise<FoodCandidate[]> {
   if (!file.type.startsWith("image/")) throw new Error("请上传图片文件");
-  if (file.size > 8 * 1024 * 1024) throw new Error("图片不能超过 8MB");
+  if (file.size > 20 * 1024 * 1024) throw new Error("图片不能超过 20MB");
   const credential = getCredentialStore(householdId).getDecryptedVisionCredential();
   if (!credential) throw new Error("图片识别需要配置千问视觉或 OpenAI Key，或改用手动入库");
   const image = `data:${file.type};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
@@ -54,12 +54,13 @@ A) 实物食材照片 → 识别看得见或高度确定的食物
 B) 购物小票/发票/收据/购物清单 → 从凭证文字中提取食物项目
 
 处理规则：
+- 所有食物名称必须使用中文！即使包装上是英文或其他语言，也必须翻译为常用的中文名（例如 Milk → 牛奶，Chicken Breast → 鸡胸肉，Avocado → 牛油果，Salmon → 三文鱼）
 - 若为小票/发票/清单：优先取凭证上的实际数量和单位；必须跳过非食物项（纸巾、洗衣液、垃圾袋等日用品）
 - 若为实物食材：只返回看得见或高度确定的食物
 - 数量不确定时用 1
 - 必须只返回合法 JSON，不要 Markdown`;
   const systemPrompt = isQwen
-    ? `${basePrompt}。格式：{"candidates":[{"name":"食物名","category":"蔬菜","quantity":1,"unit":"份","storageLocation":"冷藏室","opened":false}]}。category 只能是：${foodCategories.join("、")}；storageLocation 只能是：${storageLocations.join("、")}。`
+    ? `${basePrompt}。格式：{"candidates":[{"name":"食物名(必须中文)","category":"蔬菜","quantity":1,"unit":"份","storageLocation":"冷藏室","opened":false}]}。category 只能是：${foodCategories.join("、")}；storageLocation 只能是：${storageLocations.join("、")}。`
     : `${basePrompt}。格式为 ${JSON.stringify(candidatesSchema.toJSONSchema({ target: "draft-7" }))}`;
   const response = await fetch(isQwen ? "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" : "https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -68,7 +69,7 @@ B) 购物小票/发票/收据/购物清单 → 从凭证文字中提取食物项
       model: credential.visionModel,
       temperature: 0,
       ...(isQwen ? {} : { response_format: { type: "json_schema", json_schema: { name: "food_candidates", strict: false, schema: candidatesSchema.toJSONSchema({ target: "draft-7" }) } } }),
-      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: [{ type: "text", text: "请分析这张图片，提取其中的食物信息。如果是小票或发票，请从文字中提取食物项目。" }, { type: "image_url", image_url: { url: image } }] }],
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: [{ type: "text", text: "请用中文分析这张图片，提取其中的食物信息。所有食物名称必须用中文。如果是小票或发票，请从文字中提取食物项目并翻译为中文名。" }, { type: "image_url", image_url: { url: image } }] }],
     }),
   });
   if (!response.ok) throw new Error("图片识别暂时不可用，请改用手动录入");

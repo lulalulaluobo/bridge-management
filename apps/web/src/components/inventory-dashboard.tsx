@@ -26,6 +26,37 @@ type ChatMessage = { id: string; role: "assistant" | "user"; content: string; st
 const todayValue = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const initialForm: AddForm = { name: "", category: "其他", quantity: "1", unit: "份", purchasedAt: todayValue, storageLocation: "冷藏室", opened: false };
 
+/** Compress image client-side: resize to max 1920px, convert to JPEG 0.75 quality */
+async function compressImage(file: File, maxSize = 1920, quality = 0.75): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxSize || height > maxSize) {
+        const scale = maxSize / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { resolve(file); return; }
+          resolve(new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        quality,
+      );
+    };
+    img.onerror = () => reject(new Error("无法读取图片"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 export function InventoryDashboard({ username, initialBatches, initialCredentials, initialPreferences, vapidPublicKey }: { username: string; initialBatches: FoodBatchWithStatus[]; initialCredentials: CredentialSummary[]; initialPreferences: FoodPreferences; vapidPublicKey: string }) {
   const [batches, setBatches] = useState(initialBatches);
   const [form, setForm] = useState<AddForm>(initialForm);
@@ -147,21 +178,15 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
 
   async function recognizeImage(file: File) {
     setBusy(true);
-    setNotice("📷 正在使用 AI 识别照片中的食材，请稍候...");
+    setNotice("📷 正在压缩并识别照片中的食材，请稍候...");
     setAgentPhase("thinking");
     try {
-      const upload = new FormData(); upload.set("file", file);
+      const compressed = await compressImage(file);
+      const upload = new FormData(); upload.set("file", compressed);
       const response = await fetch("/api/media/image", { method: "POST", body: upload }); const data = await response.json() as { candidates?: FoodCandidate[]; error?: string };
       if (!response.ok || !data.candidates) throw new Error(data.error ?? "无法识别图片，请试着用文字告诉我");
       if (!data.candidates.length) throw new Error("图片中未发现清晰食物，请手动添加");
-
-      // Auto-add directly to inventory without secondary popup sheet
-      await queueAction({
-        type: "add_batches",
-        batches: data.candidates.map((item) => ({ ...item, purchasedAt: todayValue })),
-      });
-      setAgentPhase("idle");
-      setNotice(`✅ 已为您自动将【${data.candidates.map((c) => c.name).join("、")}】存入冰箱！`);
+      setPhotoCandidates(data.candidates); setAgentPhase("idle");
     } catch (error) { setAgentPhase("idle"); setNotice(error instanceof Error ? error.message : "照片识别失败"); } finally { setBusy(false); }
   }
 
@@ -197,7 +222,7 @@ export function InventoryDashboard({ username, initialBatches, initialCredential
       {subPage === "favorites" && <FavoritesView onBack={() => setSubPage("none")} />}
       {subPage === "none" && <>
         {tab === "today" && <TodayView messages={messages} notice={notice} busy={busy} agentPhase={agentPhase} setAgentPhase={setAgentPhase} recognizeImage={recognizeImage} transcribe={transcribeAndSend} voiceError={setNotice} voiceReplies={voiceReplies} toggleVoiceReplies={toggleVoiceReplies} openAdd={() => setShowAdd(true)} />}
-        {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => { if (window.confirm(`确定删除“${batch.name}”吗？`)) void queueAction({ type: "soft_delete_batch", batchId: batch.id }); }} />}
+        {tab === "inventory" && <InventoryView batches={batches} onAdd={() => setShowAdd(true)} onConsume={consume} onSetOpened={(batch, opened) => void queueAction({ type: "update_batch", batchId: batch.id, changes: { opened } })} onEditStart={setEditingBatch} onDelete={(batch) => void queueAction({ type: "soft_delete_batch", batchId: batch.id })} />}
         {tab === "recipes" && <RecipesTab initialPreferences={initialPreferences} />}
         {tab === "more" && <MoreView username={username} initialCredentials={initialCredentials} initialPreferences={initialPreferences} vapidPublicKey={vapidPublicKey} onOpenHistory={() => setSubPage("history")} onOpenFavorites={() => setSubPage("favorites")} />}
       </>}
