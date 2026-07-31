@@ -20,4 +20,20 @@ describe("meal recommendation safety", () => {
   it("rejects forbidden substitute ingredients", () => {
     expect(() => assertSafeRecommendations({ ...safe, dishes: [{ ...safe.dishes[0], substitutions: [{ ingredient: "鸡蛋", alternatives: ["花生酱"] }] }, ...safe.dishes.slice(1)] }, new Set([safe.dishes[0].uses[0].batchId]), ["花生"])).toThrow("过敏或禁忌");
   });
+
+  it("filters out dishes whose names match the exclude list (fallback for model non-compliance)", () => {
+    const allowed = new Set([safe.dishes[0].uses[0].batchId]);
+    // 用副本:assertSafeRecommendations 会就地修改 dishes 列表,避免污染共享的 safe 常量
+    const clone = { dishes: safe.dishes.map((d) => ({ ...d })) };
+    // 模型不听话:仍返回了一道被排除的菜(菠菜炒蛋),应被剔除,剩余 2 道 < 3 → 抛错
+    expect(() => assertSafeRecommendations(clone, allowed, [], ["菠菜炒蛋"])).toThrow("想不到更多新菜");
+  });
+
+  it("keeps dishes when exclude list does not match any name", () => {
+    const allowed = new Set([safe.dishes[0].uses[0].batchId]);
+    const clone = { dishes: safe.dishes.map((d) => ({ ...d })) };
+    expect(() => assertSafeRecommendations(clone, allowed, [], ["完全不相关的菜名"])).not.toThrow();
+    // 未命中,3 道菜原样保留
+    expect(clone.dishes).toHaveLength(3);
+  });
 });

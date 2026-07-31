@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { errorResponse } from "@/lib/http";
 import { getPreferenceStore } from "@/lib/preferences";
@@ -7,15 +8,25 @@ import { currentHouseholdId } from "@/lib/household";
 
 export const runtime = "nodejs";
 
+const bodySchema = z.object({
+  mealTime: z.string().max(20).optional(),
+  diners: z.string().max(20).optional(),
+  extraConditions: z.string().max(200).optional(),
+  // excludeDishes 必须是字符串数组,防止脏输入(如单个字符串)导致下游 .join() 崩溃;
+  // 限长 50 避免被撑爆 prompt。每项 trim 去空、限 40 字。
+  excludeDishes: z.array(z.string().trim().min(1).max(40)).max(50).optional(),
+});
+
 export async function POST(request: Request) {
   try {
     const householdId = await currentHouseholdId();
-    let body: { mealTime?: string; diners?: string; extraConditions?: string; excludeDishes?: string[] } = {};
+    let raw: unknown = {};
     try {
-      body = (await request.json()) as typeof body;
+      raw = await request.json();
     } catch {
       // Body may be empty
     }
+    const body = bodySchema.parse(raw);
 
     const recommendations = await recommendMeals(
       getPreferenceStore(householdId).get(),

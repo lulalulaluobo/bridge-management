@@ -8,13 +8,18 @@ import type { MealDish, MealRecommendations } from "@/lib/recipes";
 const RECOMMENDATIONS_STORAGE_KEY = "fridge_latest_meal_recommendations";
 const EXCLUDE_STORAGE_KEY = "fridge_meal_exclude_dishes";
 
+// 本地自然日(Asia/Shanghai),用于排除列表按自然日过期重置。
+// 不能用 toISOString()(UTC),否则 UTC+8 用户午夜后仍有 8 小时残留。
+function todayLocalKey(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
 function getExcludeDishes(): string[] {
   try {
     const cached = localStorage.getItem(EXCLUDE_STORAGE_KEY);
     if (!cached) return [];
     const parsed = JSON.parse(cached) as { date: string; dishes: string[] };
-    const today = new Date().toISOString().split("T")[0];
-    if (parsed.date === today) {
+    if (parsed.date === todayLocalKey()) {
       return parsed.dishes;
     }
   } catch {
@@ -25,8 +30,7 @@ function getExcludeDishes(): string[] {
 
 function saveExcludeDishes(dishes: string[]) {
   try {
-    const today = new Date().toISOString().split("T")[0];
-    localStorage.setItem(EXCLUDE_STORAGE_KEY, JSON.stringify({ date: today, dishes }));
+    localStorage.setItem(EXCLUDE_STORAGE_KEY, JSON.stringify({ date: todayLocalKey(), dishes }));
   } catch {
     // Ignore
   }

@@ -145,7 +145,7 @@ export async function recommendMeals(
   const rawJson = parseJson(data.choices?.[0]?.message?.content ?? "");
   const cleanedJson = cleanRecommendationJson(rawJson, allowedIds);
   const result = recommendationsSchema.parse(cleanedJson);
-  assertSafeRecommendations(result, allowedIds, forbidden);
+  assertSafeRecommendations(result, allowedIds, forbidden, params.excludeDishes ?? []);
 
   const ingredientById = new Map(ingredients.map((item) => [item.id, item]));
 
@@ -271,11 +271,23 @@ function parseJson(content: string) {
   return JSON.parse((match?.[1] ?? content).trim());
 }
 
-export function assertSafeRecommendations(result: { dishes: z.infer<typeof dishSchema>[] }, allowedIds: Set<string>, forbidden: string[]) {
+export function assertSafeRecommendations(
+  result: { dishes: z.infer<typeof dishSchema>[] },
+  allowedIds: Set<string>,
+  forbidden: string[],
+  excludeDishes: string[] = []
+) {
   for (const dish of result.dishes) {
     if (dish.uses.some((use) => !allowedIds.has(use.batchId))) throw new Error("推荐包含不存在或受限的库存批次");
     const content = normalize([dish.name, dish.reason, ...dish.missingIngredients, ...dish.substitutions.flatMap((item) => [item.ingredient, ...item.alternatives])].join(" "));
     if (forbidden.some((term) => content.includes(term))) throw new Error("推荐包含过敏或禁忌食材");
+  }
+  // 服务端兜底:即便 prompt 要求排除,模型仍可能返回被排除的菜(temperature 升高时更易发生)。
+  // 这里对精确菜名命中做剔除,保证"换一批"承诺;同义词不匹配(交给 prompt)。
+  if (excludeDishes.length) {
+    const excluded = new Set(excludeDishes.map(normalize));
+    result.dishes = result.dishes.filter((dish) => !excluded.has(normalize(dish.name)));
+    if (result.dishes.length < 3) throw new Error("暂时想不到更多新菜了,请稍后再试或调整口味条件");
   }
 }
 
