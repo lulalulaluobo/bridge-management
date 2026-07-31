@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const householdId = await currentHouseholdId();
-    let body: { mealTime?: string; diners?: string; extraConditions?: string } = {};
+    let body: { mealTime?: string; diners?: string; extraConditions?: string; excludeDishes?: string[] } = {};
     try {
       body = (await request.json()) as typeof body;
     } catch {
@@ -25,6 +25,7 @@ export async function POST(request: Request) {
         mealTime: body.mealTime,
         diners: body.diners,
         extraConditions: body.extraConditions,
+        excludeDishes: body.excludeDishes,
       }
     );
 
