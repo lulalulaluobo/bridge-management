@@ -8,6 +8,12 @@
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4-38BDF8?style=flat-square&logo=tailwindcss)](https://tailwindcss.com/)
 [![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=flat-square&logo=docker)](https://www.docker.com/)
 
+<p align="center">
+  <img src="docs/assets/screenshot-home.jpg" width="300" alt="冰箱小精灵 - 主界面" />
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/screenshot-recipe.jpg" width="300" alt="冰箱小精灵 - 菜谱步骤" />
+</p>
+
 ---
 
 ## 🌟 核心亮点与特色
