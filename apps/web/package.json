@@ -4,10 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "predev": "node scripts/sync-howtocook.mjs",
     "build": "next build --webpack",
+    "prebuild": "node scripts/sync-howtocook.mjs",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync:recipes": "node scripts/sync-howtocook.mjs"
   },
   "dependencies": {
     "@serwist/next": "^9.5.12",

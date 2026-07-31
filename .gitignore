@@ -15,3 +15,6 @@ references/
 *.db-wal
 *.log
 .worktrees/
+
+# HowToCook 同步产物(由 sync-howtocook.mjs 生成)
+apps/web/public/howtocook/
