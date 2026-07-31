@@ -8,21 +8,15 @@ services:
     environment:
       FRIDGE_DATABASE_PATH: /data/fridge.db
       LOCAL_ASR_URL: http://local-asr:8787
-    depends_on:
-      local-asr:
-        condition: service_started
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3000"
     volumes:
       - fridge-data:/data
 
-  local-asr:
-    build:
-      context: ./services/local-asr
-    restart: unless-stopped
-    volumes:
-      - asr-models:/models
-
 volumes:
   fridge-data:
-  asr-models:
+
+networks:
+  default:
+    name: fridge-agent_default
+    external: true
