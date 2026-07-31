@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "public/sw.js",
     "public/swe-worker-*.js",
     "next-env.d.ts",
+    // Vendored third-party data(HowToCook submodule,无需 lint)
+    "vendor/**",
   ]),
 ]);
 

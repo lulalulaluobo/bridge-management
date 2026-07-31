@@ -108,7 +108,7 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
   return (
     <section className="rounded-3xl bg-white p-4 shadow-sm">
       <h2 className="text-lg font-bold text-[#173f35]">今天吃什么？</h2>
-      <p className="mt-1 text-xs leading-5 text-slate-500">优先临期和已开封食材；下厨房精选菜谱，指导你看着页面做饭。</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">优先临期和已开封食材；开源家常菜谱，指导你看着页面做饭。</p>
 
       {/* 就战与餐次选项 */}
       <div className="mt-3 rounded-2xl bg-[#f5f7f4] p-3 text-sm">
@@ -178,7 +178,7 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
         onClick={recommend}
         className="mt-4 w-full rounded-2xl bg-[#173f35] px-4 py-3.5 text-sm font-bold text-white shadow-md active:scale-95 disabled:opacity-50"
       >
-        {busy ? "正在分析库存与下厨房菜谱…" : "推荐菜谱方案"}
+        {busy ? "正在分析库存与开源菜谱…" : "推荐菜谱方案"}
       </button>
 
       {notice && (
@@ -223,15 +223,15 @@ export function MealRecommendationCards({
             {dish.cover && (
               <div className="relative h-40 w-full overflow-hidden bg-slate-100">
                 {/* eslint-disable-next-html-element-suppression */}
-                <img src={dish.cover} alt={dish.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                <img src={dish.cover} alt={dish.name} className="h-full w-full object-cover" />
                 {dish.score && (
                   <span className="absolute left-2.5 top-2.5 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-amber-300 backdrop-blur-md">
-                    ⭐ {dish.score} 分
+                    难度 {dish.score}
                   </span>
                 )}
                 {dish.cooked && (
                   <span className="absolute right-2.5 top-2.5 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-md">
-                    {dish.cooked}
+                    🔥 {dish.cooked}
                   </span>
                 )}
               </div>
@@ -423,7 +423,7 @@ export function CookingModal({
         {/* Header photo & title */}
         <div className="relative h-60 w-full bg-slate-800">
           {recipe.cover ? (
-            <img src={recipe.cover} alt={recipe.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+            <img src={recipe.cover} alt={recipe.name} className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-[#173f35] text-3xl font-bold text-white">
               {recipe.name}
@@ -434,8 +434,8 @@ export function CookingModal({
           <div className="absolute bottom-4 left-5 right-5">
             <h2 className="text-2xl font-bold text-white tracking-tight">{recipe.name}</h2>
             <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-amber-300">
-              {recipe.score && <span>⭐ 下厨房 {recipe.score} 分</span>}
-              {recipe.cooked && <span>· {recipe.cooked}</span>}
+              {recipe.score && <span>难度 {recipe.score}</span>}
+              {recipe.cooked && <span>· 🔥 {recipe.cooked}</span>}
             </div>
           </div>
         </div>
@@ -475,7 +475,7 @@ export function CookingModal({
 
                     {step.img && (
                       <div className="mt-3.5 overflow-hidden rounded-2xl bg-slate-100">
-                        <img src={step.img} alt={`步骤 ${step.step}`} referrerPolicy="no-referrer" className="max-h-72 w-full object-cover" />
+                        <img src={step.img} alt={`步骤 ${step.step}`} className="max-h-72 w-full object-cover" />
                       </div>
                     )}
                   </div>
