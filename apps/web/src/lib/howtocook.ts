@@ -3,7 +3,7 @@ import "server-only";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, basename, relative, sep } from "node:path";
 
-// ---- 对外类型(与 xiachufang 同形状,drop-in 替换) ----
+// ---- 对外类型(drop-in 替换原 xiachufang 抓取层,返回形状一致) ----
 export type HowToCookSearchResult = {
   id: string;
   name: string;
@@ -210,7 +210,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return inter / (a.size + b.size - inter);
 }
 
-// ---- 对外函数(与 xiachufang 同签名,async 兼容) ----
+// ---- 对外函数(async 签名,兼容原调用点) ----
 export async function getRecipeDetail(recipeId: string): Promise<HowToCookRecipeDetail | null> {
   const index = buildIndex();
   return index.get(recipeId) ?? null;
