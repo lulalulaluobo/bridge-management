@@ -6,7 +6,7 @@ import { getInventoryStore } from "@/lib/inventory/store";
 import { getCredentialStore, providerBaseURL } from "@/lib/llm/credentials";
 import { type FoodCandidate } from "@/lib/media/recognition";
 import { type FoodPreferences } from "@/lib/preferences";
-import { getXiachufangRecipeDetail, searchXiachufang } from "@/lib/xiachufang";
+import { getRecipeDetail, searchRecipes } from "@/lib/howtocook";
 
 const dishSchema = z.object({
   name: z.string().min(1).max(100),
@@ -136,7 +136,7 @@ export async function recommendMeals(
 
   const ingredientById = new Map(ingredients.map((item) => [item.id, item]));
 
-  // Enrich with Xiachufang API / Scraper details concurrently
+  // Enrich with HowToCook local index details concurrently
   const enrichedDishes: MealDish[] = await Promise.all(
     result.dishes.map(async (dish) => {
       const availableIngredients = dish.uses.flatMap((use) => {
@@ -144,7 +144,7 @@ export async function recommendMeals(
         return ingredient ? [{ name: ingredient.name, quantity: use.quantity, unit: use.unit, source: ingredient.source }] : [];
       });
 
-      // Search Xiachufang for matching recipe
+      // Search HowToCook for a matching recipe
       let recipeId: string | undefined;
       let cover: string | undefined;
       let score: string | undefined;
@@ -154,7 +154,7 @@ export async function recommendMeals(
       let url: string | undefined;
 
       try {
-        const searchResults = await searchXiachufang(dish.name, 3);
+        const searchResults = await searchRecipes(dish.name, 3);
         if (searchResults.length > 0) {
           const match = searchResults[0];
           recipeId = match.id;
@@ -163,8 +163,8 @@ export async function recommendMeals(
           cooked = match.cooked;
           url = match.url;
 
-          // Fetch full recipe steps from Xiachufang
-          const detail = await getXiachufangRecipeDetail(match.id);
+          // Fetch full recipe details from HowToCook
+          const detail = await getRecipeDetail(match.id);
           if (detail) {
             if (detail.cover) cover = detail.cover;
             if (detail.score) score = detail.score;
@@ -174,10 +174,10 @@ export async function recommendMeals(
           }
         }
       } catch (err) {
-        console.warn("Failed to fetch Xiachufang details for dish:", dish.name, err);
+        console.warn("Failed to fetch HowToCook details for dish:", dish.name, err);
       }
 
-      // If steps are still missing (e.g. captcha or no Xiachufang match), generate clear steps with LLM
+      // If steps are still missing (no HowToCook match), generate clear steps with LLM
       if (!steps || !steps.length) {
         const fallback = await generateFallbackRecipeSteps(
           dish.name,

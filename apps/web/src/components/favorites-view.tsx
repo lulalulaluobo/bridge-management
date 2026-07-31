@@ -103,7 +103,7 @@ export function FavoritesView({ embedded = false, onBack }: { embedded?: boolean
               {recipe.cover ? (
                 <div className="h-28 w-28 shrink-0 bg-slate-100">
                   {/* eslint-disable-next-html-element-suppression */}
-                  <img src={recipe.cover} alt={recipe.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                  <img src={recipe.cover} alt={recipe.name} className="h-full w-full object-cover" />
                 </div>
               ) : (
                 <div className="flex h-28 w-28 shrink-0 items-center justify-center bg-[#173f35] font-bold text-white">
@@ -124,7 +124,7 @@ export function FavoritesView({ embedded = false, onBack }: { embedded?: boolean
                       删除
                     </button>
                   </div>
-                  {recipe.score && <p className="mt-1 text-xs font-semibold text-amber-600">⭐ {recipe.score} 分</p>}
+                  {recipe.score && <p className="mt-1 text-xs font-semibold text-amber-600">难度 {recipe.score}</p>}
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-[#6f8178]">

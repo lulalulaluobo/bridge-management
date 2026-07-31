@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { errorResponse } from "@/lib/http";
 import { getFavoritesStore } from "@/lib/favorites";
 import { currentHouseholdId } from "@/lib/household";
-import { getXiachufangRecipeDetail } from "@/lib/xiachufang";
+import { getRecipeDetail } from "@/lib/howtocook";
 
 import { generateFallbackRecipeSteps } from "@/lib/recipes";
 
@@ -44,9 +44,9 @@ export async function POST(request: Request) {
     let steps = body.steps || [];
     let tips = body.tips || "";
 
-    // If recipeId exists and steps are missing, attempt to pull details from Xiachufang
+    // If recipeId exists and steps are missing, attempt to pull details from HowToCook
     if (recipeId && (!steps.length || !ingredients.length)) {
-      const detail = await getXiachufangRecipeDetail(recipeId);
+      const detail = await getRecipeDetail(recipeId);
       if (detail) {
         if (!name) name = detail.name;
         if (!cover) cover = detail.cover;
