@@ -53,6 +53,7 @@ export type RecommendationParams = {
   mealTime?: "早餐" | "午餐" | "晚餐" | "夜宵" | string;
   diners?: "1人" | "2人" | "3-4人" | "5人以上" | string;
   extraConditions?: string;
+  excludeDishes?: string[];
 };
 
 export async function recommendMeals(
@@ -95,6 +96,7 @@ export async function recommendMeals(
   const timeContext = params.mealTime ? `用餐时间段：${params.mealTime}` : "";
   const dinersContext = params.diners ? `就餐人数：${params.diners}` : "";
   const extraContext = params.extraConditions ? `额外条件/用户特别要求：${params.extraConditions}` : "";
+  const excludeContext = params.excludeDishes?.length ? `严禁推荐以下菜品或与其高度相似的同义菜品：${params.excludeDishes.join("、")}` : "";
 
   const response = await fetch(
     `${providerBaseURL(credential.provider, credential.baseUrl) ?? "https://api.openai.com/v1"}/chat/completions`,
@@ -103,7 +105,7 @@ export async function recommendMeals(
       headers: { Authorization: `Bearer ${credential.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: credential.chatModel,
-        temperature: 0.4,
+        temperature: params.excludeDishes?.length ? 0.7 : 0.4,
         response_format:
           credential.provider === "deepseek"
             ? { type: "json_object" }
@@ -111,7 +113,7 @@ export async function recommendMeals(
         messages: [
           {
             role: "system",
-            content: `你是家庭冰箱菜谱助手。必须返回 3 到 5 道菜；优先用临期、已开封食材，再考虑照片候选食材。过敏和禁忌最高优先级：禁止使用、建议或作为替代食材出现。uses 中的 batchId 必须来自食材 JSON。substitutions 只列真正可替代的食材；没有则为空数组。missingIngredients 只列确实缺少且常备调料中也没有的配料。遵守最大用时、厨具、烹饪水平、用餐时间段、就餐人数和额外条件。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(
+            content: `你是家庭冰箱菜谱助手。必须返回 3 到 5 道菜；优先用临期、已开封食材，再考虑照片候选食材。过敏和禁忌最高优先级：禁止使用、建议或作为替代食材出现。uses 中的 batchId 必须来自食材 JSON，且 uses 中的 quantity 必须是大于 0 的正数数值（严禁为 0 或负数，严禁写成字符串）。substitutions 只列真正可替代的食材；没有则为空数组。missingIngredients 只列确实缺少且常备调料中也没有的配料。遵守最大用时、厨具、烹饪水平、用餐时间段、就餐人数和额外条件。只返回合法 JSON，不要 Markdown，必须符合此 JSON Schema：${JSON.stringify(
               recommendationsSchema.toJSONSchema({ target: "draft-7" })
             )}`,
           },
@@ -121,9 +123,18 @@ export async function recommendMeals(
               preferences.dietaryNotes || "无"
             }；可用厨具：${JSON.stringify(preferences.appliances)}；最大用时：${preferences.maxCookingMinutes} 分钟；烹饪水平：${
               preferences.cookingSkill
-            }；常备调料：${JSON.stringify(preferences.staples)}；${timeContext}；${dinersContext}；${extraContext}；食材 JSON：${JSON.stringify(ingredients)}`,
+            }；常备调料：${JSON.stringify(preferences.staples)}；${timeContext}；${dinersContext}；${extraContext}；${excludeContext}；食材 JSON：${JSON.stringify(ingredients)}`,
           },
-          { role: "user", content: photoCandidates.length ? "基于冰箱库存和这次照片识别到的候选食材，结合就餐条件，推荐今天可做的菜。" : "今天吃什么？请根据我的食材与就餐条件推荐最适合的菜。" },
+          {
+            role: "user",
+            content:
+              (photoCandidates.length
+                ? "基于冰箱库存和这次照片识别到的候选食材，结合就餐条件，推荐今天可做的菜。"
+                : "今天吃什么？请根据我的食材与就餐条件推荐最适合的菜。") +
+              (excludeContext
+                ? `\n请注意：本次推荐中，严禁包含以下任何菜品或与其高度相似的同义菜品：${params.excludeDishes?.join("、")}。如果你无法找到足够的新菜，可以推荐包含缺失食材的菜，但绝不能包含上述已排除的菜品。`
+                : ""),
+          },
         ],
       }),
     }
@@ -131,7 +142,9 @@ export async function recommendMeals(
 
   if (!response.ok) throw new Error("菜式推荐暂时不可用，请稍后重试");
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const result = recommendationsSchema.parse(parseJson(data.choices?.[0]?.message?.content ?? ""));
+  const rawJson = parseJson(data.choices?.[0]?.message?.content ?? "");
+  const cleanedJson = cleanRecommendationJson(rawJson, allowedIds);
+  const result = recommendationsSchema.parse(cleanedJson);
   assertSafeRecommendations(result, allowedIds, forbidden);
 
   const ingredientById = new Map(ingredients.map((item) => [item.id, item]));
@@ -268,4 +281,64 @@ export function assertSafeRecommendations(result: { dishes: z.infer<typeof dishS
 
 function normalize(value: string) {
   return value.toLocaleLowerCase("zh-CN").replace(/\s+/g, "");
+}
+
+function cleanRecommendationJson(raw: any, allowedIds: Set<string>): any {
+  if (!raw || typeof raw !== "object") return { dishes: [] };
+  if (!Array.isArray(raw.dishes)) raw.dishes = [];
+  
+  raw.dishes = raw.dishes.filter((dish: any) => {
+    if (!dish || typeof dish !== "object") return false;
+    
+    // 规整菜品名称
+    if (typeof dish.name !== "string" || !dish.name.trim()) dish.name = "推荐菜品";
+    
+    // 规整食材消耗 uses
+    if (!Array.isArray(dish.uses)) dish.uses = [];
+    dish.uses = dish.uses.filter((use: any) => {
+      if (!use || typeof use !== "object") return false;
+      if (typeof use.batchId !== "string" || !use.batchId) return false;
+      
+      // 强制转为正数
+      let qty = Number(use.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        qty = 1;
+      }
+      use.quantity = qty;
+      
+      if (typeof use.unit !== "string" || !use.unit) use.unit = "份";
+      return true;
+    });
+    
+    // 若 uses 列表为空，从 allowedIds 挑一个作为备用，避免 Zod min(1) 校验报错
+    if (dish.uses.length === 0) {
+      const fallbackId = Array.from(allowedIds)[0];
+      if (fallbackId) {
+        dish.uses.push({ batchId: fallbackId, quantity: 1, unit: "份" });
+      } else {
+        return false;
+      }
+    }
+    
+    // 规整食材替代 substitutions
+    if (!Array.isArray(dish.substitutions)) dish.substitutions = [];
+    dish.substitutions = dish.substitutions.filter((sub: any) => {
+      if (!sub || typeof sub !== "object") return false;
+      if (typeof sub.ingredient !== "string" || !sub.ingredient.trim()) return false;
+      if (!Array.isArray(sub.alternatives)) sub.alternatives = [];
+      sub.alternatives = sub.alternatives.filter((alt: any) => typeof alt === "string" && alt.trim());
+      return sub.alternatives.length > 0;
+    });
+    
+    // 规整缺失食材 missingIngredients
+    if (!Array.isArray(dish.missingIngredients)) dish.missingIngredients = [];
+    dish.missingIngredients = dish.missingIngredients.filter((item: any) => typeof item === "string" && item.trim());
+    
+    // 规整推荐理由 reason
+    if (typeof dish.reason !== "string" || !dish.reason.trim()) dish.reason = "适合今天烹饪";
+    
+    return true;
+  });
+  
+  return raw;
 }

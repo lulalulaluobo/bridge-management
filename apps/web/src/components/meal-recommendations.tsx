@@ -6,6 +6,39 @@ import type { FoodPreferences } from "@/lib/preferences";
 import type { MealDish, MealRecommendations } from "@/lib/recipes";
 
 const RECOMMENDATIONS_STORAGE_KEY = "fridge_latest_meal_recommendations";
+const EXCLUDE_STORAGE_KEY = "fridge_meal_exclude_dishes";
+
+function getExcludeDishes(): string[] {
+  try {
+    const cached = localStorage.getItem(EXCLUDE_STORAGE_KEY);
+    if (!cached) return [];
+    const parsed = JSON.parse(cached) as { date: string; dishes: string[] };
+    const today = new Date().toISOString().split("T")[0];
+    if (parsed.date === today) {
+      return parsed.dishes;
+    }
+  } catch {
+    // Ignore
+  }
+  return [];
+}
+
+function saveExcludeDishes(dishes: string[]) {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    localStorage.setItem(EXCLUDE_STORAGE_KEY, JSON.stringify({ date: today, dishes }));
+  } catch {
+    // Ignore
+  }
+}
+
+function clearExcludeDishes() {
+  try {
+    localStorage.removeItem(EXCLUDE_STORAGE_KEY);
+  } catch {
+    // Ignore
+  }
+}
 
 export function MealRecommendations({ initialPreferences }: { initialPreferences: FoodPreferences }) {
   const [preferences, setPreferences] = useState(initialPreferences);
@@ -48,6 +81,7 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
   }
 
   async function recommend() {
+    clearExcludeDishes();
     setBusy(true);
     setNotice("");
     try {
@@ -57,6 +91,38 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mealTime, diners, extraConditions }),
+      });
+      const data = (await response.json()) as { recommendations?: MealRecommendations; error?: string };
+      if (!response.ok || !data.recommendations) throw new Error(data.error ?? "暂时无法推荐菜式");
+      setResults(data.recommendations);
+      try {
+        localStorage.setItem(RECOMMENDATIONS_STORAGE_KEY, JSON.stringify(data.recommendations));
+      } catch {
+        // Ignore
+      }
+      await loadFavorites();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "暂时无法推荐菜式");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function recommendMore() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const currentDishNames = results?.dishes.map((dish) => dish.name) ?? [];
+      const existingExcluded = getExcludeDishes();
+      const newExcluded = Array.from(new Set([...existingExcluded, ...currentDishNames]));
+      saveExcludeDishes(newExcluded);
+
+      const saved = await savePreferences(preferences);
+      setPreferences(saved);
+      const response = await fetch("/api/recommendations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mealTime, diners, extraConditions, excludeDishes: newExcluded }),
       });
       const data = (await response.json()) as { recommendations?: MealRecommendations; error?: string };
       if (!response.ok || !data.recommendations) throw new Error(data.error ?? "暂时无法推荐菜式");
@@ -188,12 +254,22 @@ export function MealRecommendations({ initialPreferences }: { initialPreferences
       )}
 
       {results && (
-        <MealRecommendationCards
-          recommendations={results}
-          favoritesMap={favoritesMap}
-          onToggleFavorite={toggleFavorite}
-          onSelectRecipe={setSelectedRecipe}
-        />
+        <>
+          <MealRecommendationCards
+            recommendations={results}
+            favoritesMap={favoritesMap}
+            onToggleFavorite={toggleFavorite}
+            onSelectRecipe={setSelectedRecipe}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={recommendMore}
+            className="mt-3.5 flex w-full items-center justify-center gap-1.5 rounded-2xl border border-emerald-600 bg-white py-3 text-xs font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-50 active:scale-98 disabled:opacity-50"
+          >
+            🔄 不合口味，换一批菜谱
+          </button>
+        </>
       )}
 
       {selectedRecipe && <CookingModal recipe={selectedRecipe} onClose={() => setSelectedRecipe(null)} />}
