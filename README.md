@@ -100,16 +100,58 @@ pnpm start
 
 ---
 
-## 🐳 Docker 一键部署
+## 🐳 Docker 生产部署 (方案 A)
 
-构建并运行生产级 Docker 镜像：
+本项目采用**多容器架构**进行部署：
+1. **`fridge-agent`**：Next.js Web 应用容器。
+2. **`local-asr`**：Python ASR 语音识别容器（已打通 Silero VAD 与 FunASR Paraformer）。
+
+为了保持 Docker 镜像的轻量与构建/拉取效率，我们采用 **Docker 数据卷缓存模型 (方案 A)** 的设计：
+- 语音识别模型不打包在 Docker 镜像内部（镜像仅约 600MB，如果内置模型则会超过 2GB）。
+- 首次启动容器时，`local-asr` 容器会自动从网络下载大约 1GB 的 Paraformer 中文语音识别模型与 Silero 人声检测模型。
+- 下载的模型会持久化保存在 Docker 命名卷 `asr-models` 中。后续容器升级或重启时，会自动复用本地缓存，无需重新下载，实现秒级启动。
+
+### 部署步骤
+
+#### ⚡ 极简一键部署（适合全新服务器，无需克隆代码仓库）
+
+在您的生产服务器上，新建一个空白目录并直接执行以下一键命令。它会自动下载 Compose 配置文件、在 `.env.production` 中自动生成高强度安全密钥，并启动容器：
 
 ```bash
-# 启动项目容器
-docker compose -f docker-compose.production.yml up -d --build
+# 1. 下载 Compose 文件，初始化环境文件并生成随机 APP_ENCRYPTION_KEY，随后后台运行
+curl -sSL https://raw.githubusercontent.com/lulalulaluobo/bridge-management/main/docker-compose.production.yml -o docker-compose.yml \
+  && printf "APP_ENCRYPTION_KEY=%s\nDEEPSEEK_API_KEY=在此填写你的DeepSeekKey\n" "$(openssl rand -base64 32)" > .env.production \
+  && docker compose up -d
 ```
 
-容器暴露端口为 `3000`，支持挂载 `/data` 目录以持久化 SQLite 数据库。
+> [!TIP]
+> 启动后，请执行 `nano .env.production`（或您常用的编辑器）将 `DEEPSEEK_API_KEY` 替换为您真实的大模型 Key，随后执行 `docker compose restart` 重启容器生效。
+
+---
+
+#### 🛠️ 常规部署步骤（克隆仓库模式）
+
+1. **准备配置文件**：
+   在项目根目录下准备 `.env.production` 文件，填写必要的环境变量（可参考 `.env.example`）：
+   ```bash
+   APP_ENCRYPTION_KEY=你的加密密钥
+   DEEPSEEK_API_KEY=你的DeepSeek秘钥
+   # ... 其他环境变量
+   ```
+
+2. **运行容器**：
+   运行以下命令拉取最新镜像并后台启动：
+   ```bash
+   docker compose -f docker-compose.production.yml up -d
+   ```
+
+3. **启动验证**：
+   - 首次启动后，使用 `docker compose -f docker-compose.production.yml logs -f local-asr` 查看语音识别服务日志，等待模型下载完成。
+   - 待下载完成后，可以通过 `curl http://127.0.0.1:8787/health` 检查，若返回 `{"status":"ready"}` 说明语音服务已完全就绪。
+   - Web 应用将在本地 `127.0.0.1:3001` 端口提供服务。
+
+4. **Nginx 反向代理**：
+   推荐在宿主机上配置 Nginx 进行反向代理并配置 HTTPS 证书（可以参考 [deploy/nginx/bridge.lucc.fun.conf](file:///Users/luluen/ai-project/bridge-management/deploy/nginx/bridge.lucc.fun.conf)），代理至 `http://127.0.0.1:3001` 即可。
 
 ---
 

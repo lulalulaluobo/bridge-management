@@ -1,7 +1,6 @@
 services:
   fridge-agent:
-    build:
-      context: ./apps/web
+    image: lulalulaluobo/bridge-management:latest
     restart: unless-stopped
     env_file:
       - .env.production
@@ -12,11 +11,19 @@ services:
       - "127.0.0.1:3001:3000"
     volumes:
       - fridge-data:/data
+    depends_on:
+      - local-asr
+
+  local-asr:
+    image: lulalulaluobo/bridge-management-asr:latest
+    restart: unless-stopped
+    volumes:
+      - asr-models:/models
 
 volumes:
   fridge-data:
+  asr-models:
 
 networks:
   default:
     name: fridge-agent_default
-    external: true

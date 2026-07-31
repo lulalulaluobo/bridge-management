@@ -18,3 +18,9 @@ references/
 
 # HowToCook 同步产物(由 sync-howtocook.mjs 生成)
 apps/web/public/howtocook/
+
+# Python ASR local environment
+services/local-asr/.venv/
+services/local-asr/__pycache__/
+services/local-asr/*.pyc
+
