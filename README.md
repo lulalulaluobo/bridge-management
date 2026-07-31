@@ -1,6 +1,6 @@
 # 🧊 冰箱小精灵 (Fridge Management & Smart Recipe Agent)
 
-> 基于多模态 AI（LLM + Vision AI + ASR 语音识别）与下厨房菜谱生态的极简智能家庭冰箱管理与看页做饭助手。
+> 基于多模态 AI（LLM + Vision AI + ASR 语音识别）与开源 HowToCook 菜谱生态的极简智能家庭冰箱管理与看页做饭助手。
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.2-black?style=flat-square&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.0-blue?style=flat-square&logo=react)](https://react.dev/)
@@ -25,7 +25,7 @@
 
 ### 3. 🍲 智能“吃什么”推荐与看页做饭指南
 - **基于实效库存推荐**：综合冰箱现有剩余食材、用餐时间段（早/中/晚/夜宵）、就餐人数及个人饮食偏好（少油少盐、忌口等）生成定制菜谱。
-- **下厨房生态深度融合**：连接下厨房开源 API + 大模型补全缺失步骤，解决 `chuimg.com` 403 跨域防盗链问题。
+- **开源菜谱深度融合**：内嵌 [HowToCook](https://github.com/Anduin2017/HowToCook)（Unlicense，无版权风险）菜谱索引，离线可用；缺失步骤由大模型补全。
 - **做菜离线持久化与历史推荐**：推荐结果持久化到 LocalStorage，并提供独立的**全屏看页做饭**页面与收藏菜谱功能。
 
 ### 4. 📱 移动端 Ergonomics 人体工程学设计 (Apple Style)
@@ -47,7 +47,7 @@
  ├─────────────┤ ├────────────┤ ├────────────┤ ├────────────┤
  │• 语音/文字  │ │• 按临期排序│ │• 智能菜谱  │ │• 收藏菜谱  │
  │  小精灵对话 │ │• 分类/位置 │ │  推荐卡片  │ │• 操作记录  │
- │• 拍照/小票  │ │• 滑动切换  │ │• 下厨房图文│ │• LLM供应商 │
+ │• 拍照/小票  │ │• 滑动切换  │ │• HowToCook │ │• LLM供应商 │
  │  识别入库   │ │  开封状态  │ │  做菜步骤  │ │  配置管理  │
  └─────────────┘ └────────────┘ └────────────┘ └────────────┘
 ```
@@ -73,9 +73,12 @@
 
 ### 2. 安装依赖与启动
 ```bash
-# 1. 克隆项目
-git clone https://github.com/your-repo/bridge-management.git
+# 1. 克隆项目(含 HowToCook 菜谱 submodule)
+git clone --recurse-submodules https://github.com/your-repo/bridge-management.git
 cd bridge-management
+
+# 若已克隆但未带 submodule,补一步初始化:
+git submodule update --init --recursive
 
 # 2. 安装依赖
 pnpm install
@@ -92,6 +95,8 @@ cd apps/web
 pnpm build
 pnpm start
 ```
+
+> **菜谱数据源**：菜谱增强层基于开源项目 [HowToCook](https://github.com/Anduin2017/HowToCook)（Unlicense，无版权风险），以 git submodule 形式内嵌于 `apps/web/vendor/howtocook/`。开发（`predev`）与构建（`prebuild`）时会自动运行 `sync-howtocook.mjs`，把菜谱与图片同步到 `public/howtocook/` 供静态服务。
 
 ---
 
